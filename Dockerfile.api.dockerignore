@@ -1,0 +1,17 @@
+**
+!pyproject.toml
+!uv.lock
+!src/
+!src/**
+!examples/
+!examples/**
+!bench/
+!bench/**
+!synthetic/
+!synthetic/**
+!web/
+!web/public/
+!web/public/demo/
+!web/public/demo/**
+**/__pycache__
+**/*.pyc

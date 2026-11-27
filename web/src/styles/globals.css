@@ -1,0 +1,433 @@
+@import "tailwindcss";
+@import "./tokens.css";
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-sidebar: var(--sidebar);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+
+  --color-text: var(--text);
+  --color-strong: var(--text-strong);
+  --color-muted: var(--text-muted);
+  --color-faint: var(--text-faint);
+
+  --color-accent: var(--accent);
+  --color-accent-text: var(--accent-text);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-contrast: var(--accent-contrast);
+
+  --color-live: var(--live);
+  --color-live-dot: var(--live-dot);
+  --color-live-soft: var(--live-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-warning: var(--warning-text);
+  --color-warning-bg: var(--warning-bg);
+  --color-warning-border: var(--warning-border);
+  --color-revision: var(--revision);
+  --color-revision-soft: var(--revision-soft);
+  --color-approved: var(--approved);
+  --color-approved-soft: var(--approved-soft);
+  --color-assistant: var(--assistant);
+  --color-sky: var(--chip-sky);
+  --color-sky-soft: var(--chip-sky-soft);
+
+  --radius-panel: var(--radius-panel);
+  --radius-card: var(--radius-card);
+  --radius-control: var(--radius-control);
+  --radius-chip: var(--radius-chip);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-mono-face), ui-monospace, "Cascadia Mono", monospace;
+
+  --ease-out: var(--ease-out);
+}
+
+/* Estilos base dentro de la capa base: las utilidades de Tailwind siempre pueden sobrescribirlos */
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 18px;
+    line-height: 1.5;
+    /* Todas las cifras tabulares: valores de ingeniería alineados en tablas, KPI y deltas */
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap-style: balance;
+    color: var(--text-strong);
+    letter-spacing: -0.01em;
+  }
+
+  p {
+    text-wrap-style: pretty;
+  }
+
+  ::selection {
+    background: var(--accent-soft);
+    color: var(--text);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Barras de desplazamiento discretas */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+}
+
+/*
+  Transiciones entre pantallas (React <ViewTransition>, ver components/shell/page-transition.tsx).
+  Las pantallas son hermanas en la barra lateral: fundido corto con un ligero ascenso, sin
+  deslizamiento lateral. Barra lateral y superior quedan ancladas.
+*/
+::view-transition {
+  pointer-events: none;
+}
+
+::view-transition-old(.page) {
+  animation: vt-fade-out 110ms var(--ease-out) both;
+}
+::view-transition-new(.page) {
+  animation: vt-rise-in 220ms var(--ease-out) 60ms both;
+}
+
+::view-transition-group(app-sidebar),
+::view-transition-group(app-topbar) {
+  animation: none;
+  z-index: 50;
+}
+::view-transition-old(app-sidebar),
+::view-transition-old(app-topbar) {
+  display: none;
+}
+::view-transition-new(app-sidebar),
+::view-transition-new(app-topbar) {
+  animation: none;
+}
+
+@keyframes vt-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes vt-rise-in {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+  }
+}
+
+/* Skeleton: barrido sutil, desactivado con movimiento reducido */
+@keyframes skeleton-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@layer components {
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    background: var(--surface-sunken);
+    border-radius: var(--radius-chip);
+  }
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, var(--grid-line), transparent);
+    animation: skeleton-sweep 1.4s var(--ease-in-out) infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton::after {
+      animation: none;
+    }
+  }
+
+  /* Estudio: cada fila del diagrama de bosque entra con un leve desplazamiento escalonado */
+  .estudio-row {
+    animation: estudio-row-in var(--dur-slow) var(--ease-out) both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .estudio-row {
+      animation: none;
+    }
+  }
+
+  /* Superficies con brillo superior (estilo de la referencia bancaria) */
+  .surface-sheen {
+    background-image: var(--surface-sheen);
+  }
+
+  /* Ítem activo de la barra lateral: píldora elevada con borde */
+  .nav-pill {
+    background-color: var(--surface-raised);
+    background-image: var(--surface-sheen);
+    border: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-pill);
+  }
+
+  /* Papel de plano de la portada: retícula fina cada 24 px y gruesa cada 120 px */
+  .landing-paper {
+    background-image:
+      linear-gradient(var(--grid-line-major) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line-major) 1px, transparent 1px),
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size:
+      120px 120px,
+      120px 120px,
+      24px 24px,
+      24px 24px;
+  }
+
+  /* Rotulación de la portada: Archivo estrecha, como la letra técnica de los planos */
+  .landing-display {
+    font-family: var(--font-display), var(--font-sans);
+    font-variation-settings: "wdth" 72;
+    font-weight: 600;
+    letter-spacing: -0.012em;
+    text-wrap: balance;
+  }
+
+  /* Retícula de delineación para lienzos (plano / escena) */
+  .drafting-grid {
+    background-color: var(--surface-sunken);
+    background-image:
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+}
+
+/* Diálogos y menú de comandos: aparecen desde 98 % y se van más rápido de lo que llegan */
+.cmd-overlay[data-state="open"] {
+  animation: fade-in var(--dur-base) var(--ease-out);
+}
+.cmd-overlay[data-state="closed"] {
+  animation: fade-out var(--dur-fast) var(--ease-out);
+}
+.cmd-content[data-state="open"] {
+  animation: pop-in var(--dur-base) var(--ease-out);
+}
+.cmd-content[data-state="closed"] {
+  animation: pop-out var(--dur-fast) var(--ease-out);
+}
+.sheet-content[data-state="open"] {
+  animation: sheet-in var(--dur-slow) var(--ease-out);
+}
+.sheet-content[data-state="closed"] {
+  animation: sheet-out var(--dur-base) var(--ease-out);
+}
+
+/* Navegación en móvil: entra desde su borde con curva de cajón y sale más rápido */
+.nav-sheet[data-state="open"] {
+  animation: nav-sheet-in var(--dur-slow) cubic-bezier(0.32, 0.72, 0, 1);
+}
+.nav-sheet[data-state="closed"] {
+  animation: nav-sheet-out var(--dur-base) var(--ease-out);
+}
+@keyframes nav-sheet-in {
+  from {
+    translate: -100% 0;
+  }
+}
+@keyframes nav-sheet-out {
+  to {
+    translate: -100% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-sheet[data-state] {
+    animation-name: fade-in;
+  }
+  .nav-sheet[data-state="closed"] {
+    animation-name: fade-out;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    scale: 0.98;
+  }
+}
+@keyframes pop-out {
+  to {
+    opacity: 0;
+    scale: 0.98;
+  }
+}
+@keyframes sheet-in {
+  from {
+    translate: 24px 0;
+    opacity: 0;
+  }
+}
+@keyframes sheet-out {
+  to {
+    translate: 24px 0;
+    opacity: 0;
+  }
+}
+
+@keyframes row-in {
+  from {
+    opacity: 0;
+    translate: 0 -4px;
+  }
+}
+
+@keyframes tip-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+/* Trazos de plano derivados del color de texto del tema */
+:root {
+  --sheet-ink: color-mix(in oklab, var(--text) 80%, transparent);
+  --sheet-thin: color-mix(in oklab, var(--text) 38%, transparent);
+  --grid-line-major: color-mix(in oklab, var(--text) 7%, transparent);
+}
+
+/* Botón redondo del copiloto: responde al pulsar y se eleva solo con ratón */
+.copilot-launcher {
+  transition:
+    transform 160ms var(--ease-out),
+    box-shadow 200ms ease,
+    border-color 200ms ease;
+}
+.copilot-launcher:active {
+  transform: scale(0.96);
+}
+@media (hover: hover) and (pointer: fine) {
+  .copilot-launcher:hover {
+    transform: translateY(-1px);
+    border-color: color-mix(in oklab, var(--accent-strong) 55%, var(--border-strong));
+    box-shadow: var(--shadow-pop), 0 0 0 4px var(--accent-soft);
+  }
+  .copilot-launcher:hover:active {
+    transform: scale(0.96);
+  }
+}
+
+/* Pipeline: entrada de los nodos por columnas y respiración de la etapa activa */
+.pipeline-node {
+  animation: node-in 420ms var(--ease-out) both;
+}
+.pipeline-breathe {
+  animation: breathe 1.8s ease-in-out infinite;
+}
+@keyframes node-in {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+}
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pipeline-node,
+  .pipeline-breathe {
+    animation: none;
+  }
+}
+
+/* Tarjetas clicables: se elevan 1 px solo con ratón */
+@media (hover: hover) and (pointer: fine) {
+  .lift {
+    transition:
+      translate 180ms var(--ease-out),
+      border-color 180ms ease;
+  }
+  .lift:hover {
+    translate: 0 -1px;
+    border-color: var(--border-strong);
+  }
+}
+
+/* React Flow con los tokens del producto */
+.react-flow {
+  --xy-background-color: transparent;
+  --xy-edge-stroke: var(--border-strong);
+  --xy-edge-stroke-selected: var(--accent);
+  --xy-controls-button-background-color: var(--surface);
+  --xy-controls-button-background-color-hover: var(--surface-sunken);
+  --xy-controls-button-color: var(--text-muted);
+  --xy-controls-button-border-color: var(--border);
+}
+
+@keyframes estudio-row-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+}
+
+.landing-spotlight { background: radial-gradient(circle, rgb(42 168 242 / .16), rgb(42 168 242 / .05) 40%, transparent 70%); }
+[data-theme="light"] .landing-spotlight { background: radial-gradient(circle, rgb(3 87 147 / .25), rgb(3 87 147 / .09) 40%, transparent 70%); mix-blend-mode: multiply; }
+
+@custom-variant landing-compact {
+  @media (max-width: 26rem), (min-width: 64rem) and (max-height: 51rem) {
+    @slot;
+  }
+}
+
+@media (max-width: 1023px) { .process-step:not(:last-child)::after { content:""; position:absolute; left:15px; top:32px; bottom:-48px; width:1px; background:var(--border-strong); z-index:-1; } .process-step > h3,.process-step > p,.process-step > div { margin-left:48px; } }
+
+@media (prefers-reduced-motion: reduce) { .process-step > div { opacity:1 !important; transform:none !important; } }

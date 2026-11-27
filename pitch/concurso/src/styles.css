@@ -1,0 +1,207 @@
+/* Cada lámina es un plano GA: film de plóter, trazo blanco, cota roja y boquilla verde. */
+:root {
+  --film: #0f1317;
+  --film-2: #151b21;
+  --trazo: #e8ebee;
+  --trazo-2: #b9c0c7;
+  --aux: #7d8792;
+  --hair: rgba(232, 235, 238, 0.14);
+  --hair-2: rgba(232, 235, 238, 0.28);
+  --cota: #ff5a4e;
+  --boquilla: #41d69a;
+  --logo-ink-lo: #85858d;
+  --logo-ink-hi: #f4f4f6;
+  --logo-word: #f4f4f5;
+  --logo-sky: #4cbaf9;
+  --font: "Archivo Variable", "Archivo", system-ui, sans-serif;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  background: #07090b;
+  color: var(--trazo);
+  font-family: var(--font);
+  font-size: 30px;
+  font-kerning: normal;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* Escenario fijo de 1920 × 1080, escalado a la ventana */
+.escenario {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+.lamina {
+  position: relative;
+  width: 1920px;
+  height: 1080px;
+  flex: none;
+  background: var(--film);
+  overflow: hidden;
+  transform-origin: center center;
+}
+
+/* Marco del plano */
+.marco {
+  position: absolute;
+  inset: 32px;
+  border: 1.5px solid var(--hair-2);
+  pointer-events: none;
+}
+.marco::before {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border: 1px solid var(--hair);
+}
+
+/* Cajetín: identifica la lámina como en un plano real */
+.cajetin {
+  position: absolute;
+  right: 40px;
+  bottom: 40px;
+  display: grid;
+  grid-template-columns: 168px 196px 292px 104px 104px;
+  height: 84px;
+  border-top: 1.5px solid var(--hair-2);
+  border-left: 1.5px solid var(--hair-2);
+  background: var(--film);
+  font-stretch: 78%;
+}
+.cajetin > div {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 16px;
+  border-right: 1px solid var(--hair);
+  min-width: 0;
+}
+.cajetin > div:last-child { border-right: 0; }
+.cajetin small { font-size: 15px; color: var(--aux); letter-spacing: 0.01em; }
+.cajetin b { font-size: 21px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cajetin svg { height: 46px; width: auto; display: block; }
+
+/* Área útil de la lámina */
+.contenido {
+  position: absolute;
+  left: 112px;
+  right: 112px;
+  top: 104px;
+  bottom: 148px;
+}
+
+/* Tipografía: una familia, la anchura marca la jerarquía */
+.titular {
+  margin: 0;
+  font-size: 92px;
+  line-height: 1;
+  font-weight: 640;
+  font-stretch: 112%;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+  max-width: 1500px;
+}
+.estira { animation: estira 1.1s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes estira {
+  from { font-stretch: 62%; letter-spacing: 0.02em; opacity: 0; }
+  30% { opacity: 1; }
+  to { font-stretch: 112%; letter-spacing: -0.025em; opacity: 1; }
+}
+.entradilla {
+  margin: 28px 0 0;
+  max-width: 1100px;
+  font-size: 34px;
+  line-height: 1.32;
+  color: var(--trazo-2);
+  font-weight: 400;
+}
+.fuente {
+  position: absolute;
+  left: 0;
+  bottom: -40px;
+  max-width: 1000px;
+  font-size: 17px;
+  line-height: 1.35;
+  color: var(--aux);
+  font-stretch: 88%;
+}
+.cifra {
+  font-stretch: 125%;
+  font-weight: 560;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.rojo { color: var(--cota); }
+.verde { color: var(--boquilla); }
+.aux { color: var(--aux); }
+
+/* Entrada de lámina: un fundido corto, sin desplazamientos */
+.lamina-in { animation: aparece 0.35s ease-out both; }
+@keyframes aparece { from { opacity: 0; } to { opacity: 1; } }
+
+/* Interfaz del presentador (no sale en la exportación) */
+.ritmo {
+  position: absolute;
+  left: 32px;
+  top: 32px;
+  height: 3px;
+  background: var(--cota);
+  transform-origin: left;
+  opacity: 0.85;
+}
+.reloj {
+  position: absolute;
+  top: 44px;
+  right: 52px;
+  font-size: 20px;
+  font-stretch: 80%;
+  color: var(--aux);
+  font-variant-numeric: tabular-nums;
+}
+.reloj.tarde { color: var(--cota); }
+.notas {
+  position: absolute;
+  left: 112px;
+  right: 112px;
+  bottom: 140px;
+  padding: 28px 36px;
+  background: rgba(7, 9, 11, 0.94);
+  border: 1px solid var(--hair-2);
+  font-size: 28px;
+  line-height: 1.45;
+  color: var(--trazo);
+  z-index: 20;
+}
+.notas small { display: block; margin-bottom: 10px; color: var(--aux); font-size: 18px; }
+.ayuda {
+  position: fixed;
+  left: 16px;
+  bottom: 12px;
+  font-size: 13px;
+  color: #4b535c;
+  font-family: var(--font);
+}
+
+body.export .ayuda { display: none; }
+body.export *, body.export *::before, body.export *::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition: none !important; }
+}
+
+/* La cota de la torre aparece cuando el modelo termina de crecer */
+.cota-torre { animation: aparece 0.6s ease-out 2.5s both; }
+
+/* La ayuda de teclas no se ve al proyectar */
+:root:fullscreen .ayuda { display: none; }

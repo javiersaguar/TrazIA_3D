@@ -1,0 +1,412 @@
+# GA2MODEL Bench y generador sintético
+
+Tareas 1.4 y 1.5 del [roadmap](ROADMAP.md) (sección G). Miden el pipeline real del núcleo con la
+estructura de la rúbrica del jurado: 35 % geometría, 25 % atributos, 20 % cambios y 10 % escalado.
+
+> Todo lo de esta página es **sintético**. Sirve para medir y comparar extractores con verdad
+> conocida; no es precisión sobre planos de Técnicas Reunidas.
+
+## Uso
+
+```bash
+uv run python -m synthetic --casos 20 --semilla 2026          # → generated/synthetic/
+uv run python -m bench                                        # → generated/bench/report.md y .json
+uv run python -m bench --detalle                              # añade cases.json con el detalle por caso
+```
+
+`generated/` no se versiona: el conjunto se regenera igual con la misma semilla.
+
+## Qué genera `synthetic`
+
+Recipientes verticales aleatorios: diámetro, virola, fondos 2:1, faldón, de 3 a 7 boquillas y datos de
+diseño. Todos son válidos para las reglas de `trazia.model`. Cada equipo tiene:
+
+- **rev1** y **rev2**: la rev2 aplica de 1 a 4 cambios del tipo que muestra el reto (pág. 11). Por
+  ejemplo, mover o girar una boquilla, alargar la virola o el faldón, cambiar el peso o la presión, o
+  añadir o quitar una boquilla.
+- Archivos con la **convención de nombres del dataset**: `GAD_<TAG>_rev1.pdf`, `HDM_<TAG>_rev1.xlsx`…
+- `truth/<TAG>.json`: valores verdaderos de las dos revisiones y la lista de cambios esperados, con la
+  misma forma que `trazia diff`.
+
+Hay tres estilos de GA:
+
+| Estilo | Qué es | Para qué sirve |
+| --- | --- | --- |
+| `rotulado` | Parámetros escritos como `ETIQUETA = valor unidad` | Comprueba la cadena completa con el extractor actual |
+| `plano` | GA dibujado: alzado con cotas, planta con orientaciones, tabla de boquillas, datos de diseño, cajetín y triángulos Δ en la rev2 | Es el objetivo de los extractores de tablas y de visión |
+| `escaneado` | El plano rasterizado con ruido y una leve rotación, sin capa de texto | Es el objetivo del OCR |
+
+## Qué mide `bench`
+
+| Rúbrica | Métricas |
+| --- | --- |
+| Geometría 35 % | Cobertura y acierto de campos geométricos; error medio en dimensiones (mm); recall y precisión de boquillas; error de posición 3D de la cara de cada boquilla (mm); error de orientación (°); acierto de DN. **IFC frente a IFC de referencia**: elementos presentes, IoU de cajas y error de centro (mm) |
+| Atributos 25 % | Cobertura; acierto de valor + unidad; **ECE** y Brier de la confianza; puntos del diagrama de fiabilidad (en `report.json`) |
+| Cambios 20 % | Precisión, recall y F1 por campo y operación; error en la magnitud del cambio |
+| Escalado 10 % | Segundos por revisión con modelo (ingesta → IFC), revisiones por hora, llamadas a modelos de IA |
+
+El IFC de referencia del conjunto sintético se construye con los valores verdaderos.
+`bench/ifc_geometry.py` compara elemento a elemento cualquier par de IFC. Con el dataset del reto se
+usará igual contra los 4 IFC de Técnicas Reunidas: solo habrá que añadir la correspondencia de nombres
+de sus elementos.
+
+El extractor es un parámetro (`--extractor`). Para medir uno nuevo, se implementa
+`trazia.extraction.Extractor` y se registra en `EXTRACTORS` de `bench/runner.py`.
+
+## Extractores medidos
+
+| Nombre (`--extractor`) | Qué es |
+| --- | --- |
+| `etiquetas` | `LabelExtractor` del núcleo: líneas `ETIQUETA = valor unidad` |
+| `tablas` | `trazia.extractors.DrawingExtractor`: tabla de boquillas por cabecera, datos de diseño, diámetro, faldón, tag del cajetín y cotas verticales comprobadas con la cadena faldón + virola + fondo = total |
+| `combinado` | Los dos anteriores; los conflictos los bloquea el ensamblado |
+
+## Resultado actual (20 equipos, semilla 2026)
+
+| | rotulado | plano | escaneado |
+| --- | --- | --- | --- |
+| **etiquetas** · revisiones con modelo IFC | 40 / 40 | 0 / 40 | 0 / 40 |
+| **etiquetas** · campos geométricos correctos | 100 % | 0 % | 0 % |
+| **combinado** · revisiones con modelo IFC | 40 / 40 | 40 / 40 | 0 / 40 |
+| **combinado** · campos geométricos correctos | 100 % | 100 % | 0 % |
+| **combinado** · F1 de cambios | 100 % | 100 % | — |
+| **combinado** · atributos correctos (valor + unidad) | 100 % | 100 % | 100 % |
+| **combinado** · ECE de la confianza | 0,25 | 0,12 | 0,25 |
+
+Con otra semilla (99, 40 equipos, solo «plano») el combinado da 80 de 80 modelos, 100 % de geometría y
+F1 de cambios del 100 %.
+
+Cómo leerlo:
+
+- La cadena funciona de punta a punta: con el dato bien leído, el error es 0 mm, el IoU de IFC es 1 y
+  el F1 de cambios es 100 %.
+- `DrawingExtractor` lee los GA dibujados **de este generador**. Está pensado para su maqueta, así que
+  el 100 % mide robustez dentro de ese formato (cotas giradas con dígitos invertidos, rótulos
+  solapados, triángulos Δ), **no** frente a planos reales. Con el dataset del reto habrá que ajustar
+  nombres de columnas, posición del cajetín y convenciones de cotas, y medir de nuevo.
+- Los planos escaneados siguen a 0 %: falta OCR.
+- La confianza no está calibrada: las cifras fijas (0,75 a 0,95) aciertan casi siempre. El ECE es la
+  cifra que la calibración (B.6) tiene que bajar por debajo de 0,05.
+
+Durante el desarrollo, el bench encontró dos fallos de lectura del plano:
+
+- La cabecera de la tabla compartía altura con la cota de diámetro.
+- El número del triángulo Δ se tomaba por una cota.
+
+Los dos están corregidos y cubiertos por pruebas.
+
+## Generador v2: ocho proveedores y cuatro conjuntos (DEC-21)
+
+```bash
+uv run python -m synthetic --conjunto todos          # generated/synthetic_v2/<conjunto>/
+uv run python -m bench --entrada generated/synthetic_v2/s-dev --extractor combinado
+```
+
+Todo es sintético y lo dice en cada hoja («SYNTHETIC TEST DOCUMENT»). Los proveedores son
+ficticios.
+
+| Proveedor | Reservado | Idioma | Unidades | Lo que cambia |
+| --- | --- | --- | --- | --- |
+| atlas | no | en | mm | El estilo del generador v1 |
+| iberica | no | es | mm | Coma decimal, punto de miles, tabla a la izquierda, Ø con línea de cota, «L.T.» |
+| gulf | no | en | pulgadas | Fracciones de 1/16", NPS, psig, °F, lb; orden de columnas distinto |
+| prairie | no | en | pies-pulgadas | Columna de rating, servicio delante, tabla abajo |
+| nordic | no | en | mm | Texto de cotas horizontal, tabla abajo |
+| levante | no | es | mm | Dos hojas (tabla en la 2), cotas de boquilla desde la tangente inferior |
+| meridian | **sí** | en | mm | Rumbo horario desde el norte, cotas desde la tangente inferior, «I.D.» |
+| cantabrico | **sí** | es | mm + NPS | Tamaños en pulgadas, cotas horizontales, cabeceras propias |
+
+| Conjunto | Semilla | Casos | Proveedores | Notas |
+| --- | --- | --- | --- | --- |
+| `s-dev` | 2026 | 24 | los 6 públicos | Único conjunto para desarrollar y entrenar |
+| `s-reservado` | 7919 | 16 | los 2 reservados | Solo mide generalización: no se mira caso a caso |
+| `s-mecanico` | 4242 | 12 | atlas, iberica, gulf | Bomba con bancada; verdad de envolvente y bridas |
+| `s-adversarial` | 6666 | 12 | atlas, iberica | Tres trampas por caso (DEC-32), sin hoja de datos |
+
+- Cada caso lo dibuja un proveedor, por turno según su índice, y se entrega en tres degradaciones:
+  `vectorial`, `escaneado_limpio` (200 ppp) y `escaneado_pobre` (120 ppp, JPEG, giro de hasta 1,5°).
+- Uno de cada cuatro casos llega dentro de un paquete de proveedor (portada, índice, GA y placa con
+  valores distractores). Uno de cada tres llega sin hoja de datos.
+- Con proveedores en pulgadas, la verdad (en mm) cae en la rejilla de 1/16": el valor del plano es
+  exacto y el error de conversión no se confunde con un error de lectura.
+- Trampas: instrucción visible en inglés, instrucción en español, fila en blanco sobre blanco, texto
+  de 2 pt, boquilla fantasma y metadatos del PDF. La verdad nunca cambia; el valor falso queda en
+  `truth/<TAG>.json` para medir la tasa de envenenamiento.
+- Las semillas se fijaron antes de medir nada y no se cambian por resultado.
+
+### B frente al generador v2 (primera medición, sin tocar el extractor)
+
+`combinado` (etiquetas + `DrawingExtractor`), degradación `vectorial`. Porcentaje de campos
+correctos; «modelos» = revisiones que llegan a IFC.
+
+| Conjunto | Proveedor | Geometría | Atributos | Modelos |
+| --- | --- | --- | --- | --- |
+| s-dev | atlas | 100 % | 100 % | 8/8 |
+| s-dev | iberica | 14 % | 100 % | 0/8 |
+| s-dev | gulf | 0 % | 25 % | 0/8 |
+| s-dev | prairie | 0 % | 100 % | 0/8 |
+| s-dev | nordic | 8 % | 100 % | 0/8 |
+| s-dev | levante | 15 % | 25 % | 0/8 |
+| s-reservado | meridian | 0 % | 72 % | 0/16 |
+| s-reservado | cantabrico | 4 % | 81 % | 0/16 |
+
+En los escaneados, la geometría es 0 % en todos los proveedores: no hay capa de texto.
+
+**Lectura honesta.** `DrawingExtractor` se escribió mirando el generador v1, que es el estilo
+`atlas`; por eso acierta todo ahí y casi nada en el resto. Los atributos se salvan cuando hay hoja
+de datos. Este es el punto de partida del estudio: cualquier mejora de B sobre `s-dev` se medirá
+después en `s-reservado`, que B no ha visto.
+
+## Calibración, intervalos conformes y abstención (tarea 3.3, 30/10/2026)
+
+```bash
+uv run python -m bench.calibrar --datos generated/synthetic_v2   # → generated/calibration/
+uv run python -m bench.calibrar --reusar                         # reajusta sin volver a leer
+```
+
+- **Curva de D (1/11).** D no lleva curvas por canal: se ajustarían a un S-dev donde las tablas se
+  leen siempre. Su curva sale de las elecciones de la fusión en S-dev con canales apagados
+  (`--fusion-filas`, por defecto `generated/fusion/filas.json`) y solo se usa si baja la ECE de D
+  en S-dev.
+
+- **Qué hace.** Pasa B, C y D por `trazia.pipeline.process` sin calibrar sobre S-dev y
+  S-reservado. Después ajusta en S-dev y mide en S-reservado, que tiene dos proveedores que S-dev no
+  tiene.
+  - Ajuste en dos mitades de S-dev, partidas por equipo: la primera para las curvas isotónicas
+    por (estrategia, canal, vectorial o escaneado); la segunda para los cuantiles conformes y el
+    umbral de abstención.
+  - En S-dev, C usa la biblioteca sin el proveedor del caso, para no aprender la ventaja de tener
+    una plantilla propia.
+- **En el producto.** La etapa `calibrate` lee `generated/calibration/calibracion.json`. Si no
+  existe, la etapa se omite y la confianza sale sin calibrar.
+  - Rellena `confidence` (calibrada), `confidence_raw`, `interval` (conforme al 90 %) y el estado
+    `abstained`. Un campo en abstención conserva su valor, pero hay que confirmarlo antes de aprobar.
+
+Resultado en **S-reservado** (sintético, no visto en el ajuste):
+
+| Estrategia | Campos | Acierto | ECE bruta | ECE calibrada | Cobertura del intervalo al 90 % | Abstención: se quedan · riesgo |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| B | 456 | 91,7 % | 0,191 | **0,035** | **100 %** | 85,5 % · 0,0 % |
+| C | 954 | 77,8 % | 0,023 | 0,210 | 77,0 % | 24,3 % · 0,0 % |
+| D | 1.991 | 77,0 % | 0,126 | 0,270 | **94,1 %** | 58,4 % · 10,2 % |
+
+- **Objetivo del ROADMAP (ECE < 0,05 y cobertura ≥ 90 %):** B lo cumple. D cumple la cobertura,
+  pero no la ECE. C no cumple ninguno de los dos.
+- **En S-dev** el ajuste sí cumple: la ECE de D baja de 0,047 a 0,008 y la cobertura es del 97,7 %.
+  El fallo en S-reservado es un cambio de reparto que S-dev no puede enseñar:
+  - En S-dev, B lee las tablas de los seis proveedores. La geometría solo rellena 37 campos
+    vectoriales sueltos y casi todos son errores (boquillas trampa). La curva aprende que
+    «geometría sola» acierta el 8 %.
+  - En S-reservado, B no entiende las tablas de los dos proveedores nuevos. La geometría rellena 593
+    campos vectoriales y acierta el 95 %, pero la curva los deja en 0,37.
+  - Lo mismo pasa con C: sin plantilla del mismo proveedor acierta menos, y de forma distinta.
+- **Curva riesgo-cobertura de D en S-reservado:**
+
+  | Umbral | Se quedan | Riesgo |
+  | --- | --- | --- |
+  | 0 | 100 % | 23,0 % |
+  | 0,4 | 52 % | 5,7 % |
+  | 0,8 | 38 % | 2,2 % |
+
+  La ordenación sirve aunque los valores absolutos no estén bien calibrados.
+- **Intervalos.** En las franjas de confianza baja el cuantil es enorme, del orden de ±70 veces el
+  valor. Eso equivale a decir que el valor puede ser cualquiera, y el campo queda en abstención.
+- **Límite de este método.** S-reservado se miró dos veces. Tras la primera se añadió el tipo de
+  documento a la curva y la biblioteca sin el proveedor. No se ha ajustado nada más contra él. La
+  próxima mejora necesita datos de otro reparto: el dataset real (R-ref), las correcciones humanas
+  (3.8) o la fusión aprendida con señales de acuerdo entre canales (3.4).
+
+### Revisión del 31/10/2026
+
+```bash
+uv run python -m bench.fusion --datos generated/synthetic_v2            # → generated/fusion/
+uv run python -m bench.calibrar --anadir --estrategias d_hibrido+fusion # suma una estrategia
+```
+
+Tres cambios. Ninguno se ha decidido mirando S-reservado. El tercero responde al diagnóstico del
+30/10, que sí salió de S-reservado.
+
+1. **Intervalo que no informa → abstención.**
+   - **Qué fallaba.** El 30/10 este documento decía que un intervalo enorme deja el campo en
+     abstención, pero el código no lo hacía. La API devolvía «2.000 mm, de −770.001 a 774.001
+     mm» como candidato normal. Se vio al procesar la demo V-101 con D.
+   - **Qué hace ahora.** Si el cuantil supera el 5 % del valor (o 5°), no hay intervalo y el campo
+     queda `abstained` con una explicación.
+   - **Más cambios.** Los cuantiles se ajustan también por estrategia, con respaldo al cuantil
+     común. El informe cuenta la abstención igual que la etapa.
+2. **Curva sí o no, por estrategia, dejando fuera un proveedor de S-dev.**
+   - **Cómo se decide.** Para cada estrategia se comparan la ECE con curva isotónica y la ECE de la
+     confianza tal cual, en los proveedores no vistos de S-dev. Gana la menor.
+   - **C.**
+
+     | | ECE |
+     | --- | ---: |
+     | Tal cual | 0,023 |
+     | Con curva | 0,072 |
+
+     Va sin curva.
+   - **B y D.** Llevan curva: B 0,001 frente a 0,125 y D 0,013 frente a 0,047. La elección queda
+     en `calibracion.json` (`meta.calibrator_choice`).
+3. **Fusión aprendida de D (tarea 3.4).**
+   - **Qué hace.** Una regresión logística puntúa cada opción de cada campo con las señales de la
+     fusión. Las opciones son cada grupo de lecturas iguales y la medida del dibujo. Su probabilidad
+     es la confianza y no lleva curva (`passthrough`).
+   - **Cómo se entrena.** En S-dev, con canales apagados al azar: sin tablas ni cotas, sin
+     plantilla y sin ambos. Es la respuesta al diagnóstico de arriba: en S-dev la medida del dibujo
+     solo gana cuando todo falla.
+   - **Validación** dejando fuera un proveedor de S-dev, 16.055 campos:
+
+     | | Elección acertada | ECE |
+     | --- | ---: | ---: |
+     | Aprendida | 93,2 % | 0,023 |
+     | Heurística | 92,5 % | 0,068 (sin calibrar) |
+
+   - **Canales no vistos.** Si un campo tiene lecturas de un canal que S-dev no tiene (p. ej.
+     «texto», el extractor de etiquetas de la demo V-101), ese campo se fusiona con la heurística.
+
+Resultado en **S-reservado**:
+
+| Estrategia | Campos | Acierto | ECE bruta | ECE calibrada | Cobertura 90 % | Se quedan · riesgo |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| B | 456 | 91,7 % | 0,191 | **0,035** | **100 %** | 85,5 % · 0,0 % |
+| C (sin curva) | 954 | 77,8 % | 0,023 | **0,023** | 53,2 % | 0 % · — |
+| D | 1.991 | 77,0 % | 0,126 | 0,270 | **95,3 %** | 50,6 % · 4,2 % |
+| D con fusión aprendida | 1.998 | 77,7 % | 0,072 | **0,072** | **96,4 %** | **64,0 % · 4,7 %** |
+
+- **Objetivo (ECE < 0,05 y cobertura ≥ 90 %).**
+  - B lo cumple.
+  - C cumple la ECE, pero no la cobertura: con proveedores nuevos acierta menos en las franjas que
+    en S-dev salían exactas.
+  - D con fusión aprendida cumple la cobertura. Su ECE baja de 0,270 a 0,072, todavía por encima
+    del objetivo.
+  - Con abstención, D con fusión aprendida se queda el 64 % de los campos con un riesgo del 4,7 %,
+    por debajo del 5 % objetivo. D se queda el 51 %.
+- **S-reservado se ha abierto una vez más** para medir esta revisión.
+
+## Marcas de revisión (F.5, 1/11/2026)
+
+```bash
+uv run python -m bench.marcas --datos generated/synthetic_v2   # → generated/marcas/marcas.json
+```
+
+Δ dibujados (verdad sacada del PDF vectorial por su color) frente a los leídos por forma, y qué
+parte de los cambios de la verdad, localizados con la lectura de D, cae junto a una marca.
+
+| Conjunto (vectorial) | Δ leídos / dibujados | Marcas falsas | Cambios junto a una marca |
+| --- | ---: | ---: | ---: |
+| S-dev | 47 / 47 | 0 | 91 % |
+| S-reservado | 38 / 38 | 0 | 65 % |
+
+En escaneado no se buscan marcas: la línea naranja del Δ sale fina, tenue y cortada, y la
+detección en imagen daba 0 aciertos. Esas páginas se informan como «sin lectura».
+
+## Recuperación visual de C con ColQwen2 (2.5, 1/11/2026)
+
+```bash
+uv run --extra train python -m bench.rag_visual --datos generated/synthetic_v2
+# → generated/rag-visual/{recuperacion,informe}.json y estudio-<modo>/
+```
+
+ColQwen2 (`vidore/colqwen2-v1.0-hf`, unos 4,4 GB) frente a la huella ligera (rejilla de tinta y
+vocabulario), con la misma biblioteca de S-dev y la calibración v6. En el producto se activa con
+`TRAZIA_RAG_RETRIEVAL=colqwen2`. Por defecto sigue la huella.
+
+- **Coste.** Unos 0,4 s por página en la RTX 5070 y 4,6 GB de VRAM. Los vectores se guardan por
+  sha256 del PDF y página, así que cada página se procesa una sola vez. La huella cuesta 0,05 s.
+- **Elegir el proveedor correcto (S-dev, 144 GA).** Huella: 100 %. ColQwen2: 99,3 %; falla 1 GA
+  en `escaneado_pobre`.
+- **Saber si hay un caso parecido.** Se mide en S-dev quitando de la biblioteca el proveedor del
+  propio caso:
+
+  | Método | AUC | Umbral | Se aceptan (proveedor conocido) | Se aceptan (proveedor nuevo) | Se aceptan en S-reservado |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | Huella, umbral actual | 0,79 | 0,55 | 96,5 % | 74,3 % | 53,1 % |
+  | ColQwen2, umbral de Youden | 0,81 | 0,63 | 91,0 % | 34,7 % | 30,2 % |
+
+- **Resultado de C.** Puntuación GA2MODEL, con IC95 en el total:
+
+  | Recuperación | Total | S-dev | S-reservado | ECE S-reservado |
+  | --- | --- | ---: | ---: | ---: |
+  | Huella (por defecto) | **0,600** [0,556; 0,644] | 0,686 | **0,454** | **0,040** |
+  | ColQwen2 sin umbral | 0,572 [0,512; 0,629] | **0,693** | 0,321 | 0,353 |
+  | ColQwen2, umbral 0,63 | 0,562 [0,504; 0,616] | 0,670 | 0,349 | 0,206 |
+
+  No hay alucinaciones en ningún caso.
+- **Por qué no mejora.** ColQwen2 elige proveedores que se parecen: para `meridian` (inglés)
+  elige gulf, nordic o atlas, y para `cantabrico` (español) elige levante o iberica. Pero C copia
+  posiciones: necesita que cada campo esté en el mismo sitio de la lámina, y eso es lo que mide la
+  rejilla de tinta. La huella elige iberica para meridian y prairie o nordic para cantabrico, y con
+  esas plantillas C lee más.
+- **Decisión.** Queda integrado y probado, pero apagado. Volver a medirlo con los GA reales
+  (R-ref), donde los proveedores no siguen plantillas sintéticas.
+
+## Evaluación contra los IFC de TR (G.1, G.3-G.5, 16/11/2026)
+
+`python -m bench.evaluar <salida del lote> <carpeta de IFC> [--mapas DIR] [--compartible]`, o el
+notebook `databricks/03_evaluar_contra_tr`. Por cada equipo cuyo tag completo aparece en el
+nombre de un IFC (`V-7` no casa con `V-70`), toma la última revisión correcta del lote y mide:
+
+| Medida | Cómo |
+| --- | --- |
+| Diámetro y longitud de virola | `bench.referencia` sobre el IFC de TR, por geometría y sin suponer nombres; error en mm y relativo |
+| Boquillas | Emparejamiento húngaro de caras; emparejadas, faltan y sobran, recall, precisión, error de posición (mm), azimut (°), DN y sesgo de cota |
+| Convenio de azimut | El que encaja en el equipo (optimista) y el más frecuente en los demás equipos (**exclusión de uno**, G.5). Con un solo equipo la cifra queda marcada `ajustada_en_el_equipo` |
+| Superficie | Los dos IFC al mismo marco (eje del cuerpo en z, centro en planta, cota más baja en 0) y el convenio aplicado al nuestro. Distancias muestreadas en los dos sentidos: Hausdorff, percentil 95 y Chamfer en mm, IoU de cajas |
+| Mapa de calor | HTML de Plotly: nuestro modelo coloreado de 0 a `escala_mm` (50 por defecto, igual para todos) sobre la referencia en gris |
+
+`resumen_compartible` deja alias `E01`… (los mismos que el lote), errores relativos de las
+dimensiones (sin el error en mm: juntos darían la dimensión real) y errores en mm de boquillas y
+superficie.
+
+Probado solo con IFC nuestros disfrazados: sin nombres, trasladados (12, −3,5, 104) m y girados
+90° (`bench.evaluar.disfrazar`). Un lote perfecto da error < 1 mm y Hausdorff < 5 mm con el giro
+descubierto por exclusión de uno, y un diámetro con 200 mm de más aparece como tal y con Chamfer
+> 20 mm (`tests/test_bench_evaluar.py`). Límites conocidos: un IFC de TR con más elementos que el
+equipo (plataformas, escaleras, cimentación) desplaza la cota más baja y sube el Hausdorff; la
+longitud de virola depende de que el cuerpo sea un solo elemento; los horizontales no se han
+probado.
+
+## Aprobación automática frente al oro de TR (26/11/2026)
+
+`python -m bench.aprobacion <salida del lote> [eval/verdad] [--salida generated/aprobacion]`.
+Etiqueta como acierto o fallo cada campo de `revision.json` que el oro permite juzgar: campos del
+equipo con la misma ruta y sin `base` propia, NPS y rating de cada boquilla, y como fallo los
+campos de una marca que no está en el oro. Mide la precisión de lo que la API aprobaría sola
+(`trazia.api.auto_approval`, la misma regla), por umbral, por canal de lectura y por tramo de
+confianza, y una calibración isotónica ajustada sin el equipo medido. Solo escribe agregados.
+
+Lote `lote_a3_b2b1441` (código `b2b1441`, el de las cifras del pitch), 197 campos juzgables de
+10 equipos:
+
+| Medida | Resultado |
+| --- | --- |
+| Aciertos de lo juzgable | 182/197 (92,4 %) |
+| Se aprobarían solos con 0,8 | 121 (61 % de lo juzgable), **116/121 aciertos (95,9 %)** |
+| Lo que queda para la persona | 66/76 (86,8 %) |
+| Aprobables por canal | 100 % en boquillas (tabla y hoja de datos) y en texto; hoja de datos, atributos del equipo: 8/10; cotas del equipo: 4/7 |
+| ECE, puntuación de la regla → isotónica sin el equipo | 0,091 → 0,034 |
+
+Los 5 fallos que se aprobarían solos salen de dos sitios: la capacidad de BF-C-0003 en la hoja de
+datos (2) y la regla nueva `ga.columna_alzado_faldon` (3: altura y espesor del faldón de
+BF-C-0001 y BF-C-0008), que sale con confianza 0,8. Con el lote anterior (`2c35f41`, sin esa
+regla) eran 100/102. Las confianzas de los planos reales son la puntuación fija de cada regla:
+no están ordenadas (0,85 acierta más que 0,9) y una calibración isotónica sin el equipo medido
+baja el ECE (de 0,092 a 0,025 en `2c35f41`).
+
+## Hallazgos para el núcleo
+
+1. **Un texto fuera de la página tumbaba la ingesta del PDF.** `ingest_bytes` limitaba la caja a
+   [0, 1] coordenada a coordenada; un texto por completo fuera del borde dejaba `y0` y `y1`
+   invertidos y `Source` rechazaba la línea, con lo que fallaba el documento entero. **Corregido:**
+   ahora la caja se recorta al borde si el texto se sale en parte, y se descarta si queda fuera del
+   todo. En los dos casos queda un aviso por página. Un PDF corrupto da `ValueError` en vez de una
+   excepción de pdfminer. Prueba: `tests/test_lectura_ingest.py`.
+
+## Siguiente paso
+
+1. **OCR** para el estilo `escaneado`: convertir la imagen en líneas con caja, para que
+   `DrawingExtractor` funcione igual.
+2. **Calibración** (B.6): usar los pares (confianza, acierto) de `report.json` para ajustar las
+   confianzas y bajar el ECE.
+3. Con el dataset del reto: ejecutar `bench` contra los 4 IFC de referencia y ajustar
+   `DrawingExtractor` a sus planos. Medir siempre separando lo sintético de lo real.

@@ -1,0 +1,91 @@
+"""Caché compartida de etapas deterministas por página; formato JSON, sin pickle."""
+
+import hashlib
+import json
+import os
+from numbers import Integral, Real
+from pathlib import Path
+from uuid import uuid4
+
+from PIL import Image
+
+from .ocr.page_signature import page_signature
+from .pdf_limits import PDFIUM_LOCK
+
+
+def path_for(page, namespace, dpi):
+    signature = page_signature(page, dpi)
+    if signature is None:
+        return None
+    root = Path(
+        os.getenv("TRAZIA_PAGE_CACHE")
+        or (Path(os.getenv("TRAZIA_OCR_CACHE", "generated/cache/ocr")) / "page-stages")
+    )
+    key = hashlib.sha256(f"{namespace}:{signature}".encode()).hexdigest()
+    return root / namespace / key[:2] / key
+
+
+def json_number(value):
+    if isinstance(value, Integral):
+        return int(value)
+    if isinstance(value, Real):
+        return float(value)
+    raise TypeError(f"Tipo no serializable en caché: {type(value).__name__}")
+
+
+def memo_page(page, namespace, compute, *, dpi=1):
+    path = path_for(page, namespace, dpi)
+    if path:
+        try:
+            envelope = json.loads(path.read_text(encoding="utf8"))
+            content = envelope["json"]
+            if hashlib.sha256(content.encode()).hexdigest() == envelope["sha256"]:
+                return json.loads(content)
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+    result = compute()
+    if path:
+        temporary = path.with_name(path.name + "." + uuid4().hex + ".tmp")
+        try:
+            content = json.dumps(result, allow_nan=False, sort_keys=True, default=json_number)
+            envelope = {"json": content, "sha256": hashlib.sha256(content.encode()).hexdigest()}
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary.write_text(json.dumps(envelope), encoding="utf8")
+            os.replace(temporary, path)
+        except (OSError, TypeError, ValueError):
+            # La persistencia opcional nunca invalida un resultado calculado correctamente.
+            pass
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+    return result
+
+
+def render_page(page, dpi):
+    path = path_for(page, "raster-v1", dpi)
+    if path:
+        try:
+            with Image.open(path) as image:
+                return image.convert("RGB")
+        except (OSError, ValueError):
+            pass
+    with PDFIUM_LOCK:
+        image = page.to_image(resolution=dpi).original.convert("RGB")
+    if path:
+        temporary = path.with_name(path.name + "." + uuid4().hex + ".tmp")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # PNG sin pérdida con compresión mínima: los píxeles son los mismos y guardar la
+            # página A3 a 200 ppp pasa de ~0,8 s a una fracción (el archivo ocupa algo más).
+            image.save(temporary, format="PNG", compress_level=1)
+            os.replace(temporary, path)
+        except OSError:
+            pass
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+    return image

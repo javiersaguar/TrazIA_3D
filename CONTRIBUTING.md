@@ -1,0 +1,65 @@
+# Cómo trabajar en TrazIA-3D
+
+Plan completo y reparto: [docs/ROADMAP.md](docs/ROADMAP.md). Aquí está lo mínimo para no romper nada.
+
+## Autoría
+
+Los únicos autores del repositorio son **Javier Saguar Antona, Iria Lozano Carrasco, Miguel Vera del
+Castillo y Alejandro Cuevas Cid**.
+
+- Nada de `Co-authored-by`, «Generated with…» ni firmas de herramientas en commits, PR, código o
+  documentación. Los asistentes y agentes son herramientas: el autor es quien hace el commit.
+- Configura tu identidad en este clon y añade tu correo a [.github/autores.txt](.github/autores.txt):
+
+  ```bash
+  git config user.name "Nombre Apellido Apellido"
+  git config user.email "tu-correo@ejemplo.com"
+  ```
+
+- Activa `commit-msg` una vez por clon para comprobar la autoría.
+  [Automatización del evento](docs/AUTOMATIZACION.md)
+
+  ```bash
+  git config core.hooksPath .githooks
+  ```
+
+- El workflow **Autoría** falla si algún commit trae coautores o un correo fuera de la lista.
+- Si se cuela un coautor, corrige el commit **antes** de subirlo (`git commit --amend`).
+
+## Ramas y commits
+
+- Una rama por tarea: `feat/<área>-<tema>`, `fix/…`, `docs/…`, `bench/…`. PR pequeño a `main`.
+- `main` siempre demostrable: CI en verde para fusionar.
+- Mensajes en español, en imperativo y con prefijo de área: `bench: añade F1 de cambios`.
+- Un agente por worktree: `git worktree add ../TrazIA-3D-<tema> -b feat/<tema>`. Dos agentes nunca
+  comparten directorio de trabajo.
+
+## Propiedad de carpetas
+
+Cada carpeta tiene un dueño (ROADMAP, sección 5.4). Para tocar una carpeta ajena se abre un PR y se
+pide revisión a su dueño. El contrato de datos (`docs/DATA_CONTRACT.md` y el esquema JSON) solo cambia
+con revisión de los dueños afectados.
+
+## Datos
+
+- Durante el evento: flujo con asistentes de IA y Databricks en [docs/FLUJO_IA.md](docs/FLUJO_IA.md).
+- La organización ha autorizado descargar y usar el dataset de Técnicas Reunidas. La copia
+  versionada del equipo está en `data/tr/` en el repositorio privado. Las salidas de trabajo
+  tienen su carpeta aparte.
+- Los ejemplos y la demo pública usan datos sintéticos etiquetados.
+- No subir claves: usa `.env` (ignorado) y documenta las variables en `.env.example`.
+
+## Comprobaciones antes de un PR
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest -q
+```
+
+Si tocas `web/`: `pnpm typecheck`, `pnpm lint`, `pnpm build` y `pnpm test:e2e` dentro de `web/`.
+
+## Licencia
+
+MIT ([LICENSE](LICENSE)). El código previo al hackatón se declara en `PREVIOUS_WORK.md` al empezar el
+evento (25/11/2026).

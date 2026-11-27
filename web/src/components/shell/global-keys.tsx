@@ -1,0 +1,67 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import { useEffect, useRef } from "react";
+import { NAV_ITEMS } from "@/lib/nav";
+import { useIsAdmin } from "@/lib/accounts";
+import { useUi } from "@/stores/ui";
+
+export function isTyping(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
+}
+
+let lastG = 0;
+/** true justo después de pulsar G: la tecla siguiente es parte de la secuencia G + letra. */
+export function inGSequence() {
+  return performance.now() - lastG < 900;
+}
+
+/** Atajos globales: Ctrl+K, ?, [ y la secuencia G + número. */
+export function GlobalKeys() {
+  const router = useRouter();
+  const pendingG = useRef<number | null>(null);
+  const isAdmin = useIsAdmin();
+  const isAdminRef = useRef(isAdmin);
+  useEffect(() => { isAdminRef.current = isAdmin; }, [isAdmin]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const ui = useUi.getState();
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        ui.setCommandOpen(!ui.commandOpen);
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
+      if (ui.commandOpen || ui.shortcutsOpen) return;
+
+      if (e.key === "?") {
+        e.preventDefault();
+        ui.setShortcutsOpen(true);
+        return;
+      }
+      if (e.key === "[") {
+        ui.toggleSidebar();
+        return;
+      }
+      if (e.key.toLowerCase() === "g") {
+        lastG = performance.now();
+        pendingG.current = window.setTimeout(() => (pendingG.current = null), 900);
+        return;
+      }
+      if (pendingG.current != null) {
+        const item = NAV_ITEMS.find((i) => i.shortcut === e.key.toLowerCase() && (isAdminRef.current || !i.admin));
+        window.clearTimeout(pendingG.current);
+        pendingG.current = null;
+        const legacy: Record<string,string> = { "3":"/modelo?vista=revision", "4":"/modelo?vista=cambios" };
+        const href = item?.href ?? (e.key === "4" && !isAdminRef.current ? undefined : legacy[e.key.toLowerCase()]);
+        if (href) router.push(href);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [router]);
+
+  return null;
+}

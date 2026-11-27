@@ -1,0 +1,157 @@
+/* Paleta y tipografía de Técnicas Reunidas: blanco, pizarra, aguamarina y Kanit en pesos finos. */
+:root {
+  --papel: #ffffff;
+  --niebla: #f2f6f8;
+  --tinta: #1f2a33;
+  --pizarra: #5f7997;
+  --pizarra-2: #8a9db2;
+  --agua: #74d1e0;
+  --agua-suave: #e3f5f8;
+  --turquesa: #469ba9;
+  --lima: #9ec60d;
+  --linea: rgba(95, 121, 151, 0.22);
+  --linea-2: rgba(95, 121, 151, 0.4);
+  --logo-ink-lo: #6b7682;
+  --logo-ink-hi: #2a3642;
+  --logo-word: #1f2a33;
+  --logo-sky: #3aa7e6;
+  --font: "Kanit", system-ui, sans-serif;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  background: #e8edf1;
+  color: var(--tinta);
+  font-family: var(--font);
+  font-weight: 300;
+  font-size: 30px;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+.escenario { position: fixed; inset: 0; }
+.lamina {
+  position: relative;
+  width: 1920px;
+  height: 1080px;
+  background: var(--papel);
+  overflow: hidden;
+}
+
+/* Cabecera y barra de capítulos */
+.marca { position: absolute; left: 96px; top: 56px; height: 30px; }
+.cliente { position: absolute; right: 96px; top: 46px; height: 46px; }
+.capitulos {
+  position: absolute;
+  left: 96px;
+  right: 96px;
+  bottom: 52px;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+}
+.capitulo { display: flex; flex-direction: column; gap: 12px; }
+.capitulo span { font-size: 19px; font-weight: 400; color: var(--pizarra-2); transition: color 0.4s; }
+.capitulo.activo span { color: var(--tinta); }
+.capitulo .pista { position: relative; height: 3px; background: var(--linea); overflow: hidden; }
+.capitulo .pista i { position: absolute; inset: 0; background: var(--pizarra-2); transform-origin: left; }
+.capitulo.activo .pista i { background: var(--agua); }
+
+.contenido { position: absolute; left: 96px; right: 96px; top: 150px; bottom: 150px; }
+
+/* Tipografía */
+.titular {
+  position: relative;
+  margin: 0;
+  font-size: 84px;
+  line-height: 1.02;
+  font-weight: 200;
+  letter-spacing: -0.015em;
+  max-width: 1300px;
+  text-wrap: balance;
+}
+.cifra { font-weight: 200; letter-spacing: -0.02em; line-height: 1; font-variant-numeric: lining-nums; }
+.texto { font-size: 30px; line-height: 1.4; color: var(--pizarra); font-weight: 300; }
+.fuerte { font-weight: 400; color: var(--tinta); }
+.turquesa { color: var(--turquesa); }
+
+/* Barrido de lectura: el titular se descubre de izquierda a derecha tras una línea aguamarina */
+.barrido { animation: descubre 1.05s cubic-bezier(0.65, 0, 0.35, 1) both; }
+.barrido::after {
+  content: "";
+  position: absolute;
+  top: -6%;
+  bottom: -6%;
+  width: 3px;
+  background: var(--agua);
+  box-shadow: 0 0 18px var(--agua);
+  animation: linea 1.05s cubic-bezier(0.65, 0, 0.35, 1) both;
+}
+@keyframes descubre { from { clip-path: inset(-10% 100% -10% 0); } to { clip-path: inset(-10% -2% -10% 0); } }
+@keyframes linea { from { left: 0; opacity: 1; } 85% { opacity: 1; } to { left: 100%; opacity: 0; } }
+
+.lamina-in { animation: aparece 0.4s ease-out both; }
+@keyframes aparece { from { opacity: 0; } to { opacity: 1; } }
+
+/* Etiqueta para el material sintético: visible, nunca en letra pequeña */
+.sintetico {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  background: var(--niebla);
+  color: var(--pizarra);
+  font-size: 22px;
+  font-weight: 400;
+}
+.sintetico::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--pizarra-2); }
+
+/* Interfaz del presentador */
+.reloj {
+  position: absolute;
+  top: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 20px;
+  font-weight: 400;
+  color: var(--pizarra-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  /* Por encima del vídeo de la demo, que ocupa toda la lámina. */
+  z-index: 10;
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.85);
+}
+.reloj .tarde { color: #d9534f; }
+.notas {
+  position: absolute;
+  left: 96px;
+  right: 96px;
+  bottom: 120px;
+  padding: 28px 36px;
+  background: rgba(31, 42, 51, 0.95);
+  color: #fff;
+  font-size: 28px;
+  line-height: 1.45;
+  border-radius: 6px;
+  z-index: 20;
+}
+.notas small { display: block; margin-bottom: 10px; color: var(--agua); font-size: 18px; }
+.ayuda { position: fixed; left: 16px; bottom: 12px; font-size: 13px; color: #8a9db2; }
+:root:fullscreen .ayuda { display: none; }
+
+body.export .ayuda { display: none; }
+body.export *, body.export *::before, body.export *::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition: none !important;
+}
+body.export .barrido::after { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition: none !important; }
+}

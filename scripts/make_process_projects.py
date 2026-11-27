@@ -1,0 +1,165 @@
+"""Genera IFC, planos y libros de proyectos sintéticos desde una definición común."""
+
+import argparse
+import gzip
+import json
+from itertools import product
+from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
+
+from process_documents import equipment_pdf, equipment_workbook, project_pdf, workbook
+
+from trazia.process_catalog.process_geometry import scene
+from trazia.process_catalog.process_ifc import MAX_IFC_BYTES, create_ifc
+from trazia.process_catalog.process_projects import PROJECTS, edit_fields
+
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / "web/public/demo/proceso"
+INDEX = ROOT / "web/src/features/process-projects/catalog.json"
+PRESET = {
+    "plataforma-marina": "ocean",
+    "planta-desierto": "desert",
+    "terminal-costera": "coast",
+    "refineria-activa": "industrial",
+}
+MAX_TRANSPORT_BYTES = 900_000
+
+
+def review_documents(folder, project, rev, equipment, lines, routes, parts):
+    stem = f"GA_{project.code}_rev{rev}"
+    ga, index = stem + ".pdf", stem + ".campos.json"
+    fields = project_pdf(folder / ga, project, rev, equipment, lines, routes, parts)
+    (folder / index).write_text(
+        json.dumps(fields, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
+    return ga, index
+
+
+def generate(project):
+    folder = OUT / project.id
+    folder.mkdir(parents=True, exist_ok=True)
+    states = {}
+    documents = {}
+    for choices in product((False, True), repeat=len(project.changes)):
+        active = {change.tag for choice, change in zip(choices, project.changes) if choice}
+        key = "".join("1" if choice else "0" for choice in choices)
+        official = not active or len(active) == len(choices)
+        rev = ("B" if active else "A") if official else f"Ensayo-{key}"
+        equipment, lines, routes, parts = scene(project, active)
+        path = folder / f"{project.code}-{rev}.ifc"
+        triangles = create_ifc(path, project, rev, equipment, lines, routes, parts)
+        size = path.stat().st_size
+        packed = gzip.compress(path.read_bytes(), compresslevel=9, mtime=0)
+        if size > MAX_IFC_BYTES or len(packed) > MAX_TRANSPORT_BYTES:
+            raise ValueError(f"{path.name} excede el presupuesto: {size} bytes, {len(packed)} gzip")
+        transport = f"{path.name}.gz"
+        (folder / transport).write_bytes(packed)
+        states[key] = {
+            "file": path.name,
+            "bytes": size,
+            "triangles": triangles,
+            "transport": transport,
+            "transportBytes": len(packed),
+        }
+        if not official:
+            continue
+        ga, index = review_documents(folder, project, rev, equipment, lines, routes, parts)
+        data = f"Lista_{project.code}_rev{rev}.xlsx"
+        workbook(folder / data, project, rev, equipment, lines, routes, parts)
+        by_tag = {part.tag: part for part in parts}
+        documents[rev] = {"plan": ga, "fields": index, "workbook": data, "equipment": {}}
+        for eq in equipment.values():
+            drawing = f"GAD_{eq.tag}_rev{rev}.pdf"
+            hdm = f"HDM_{eq.tag}_rev{rev}.xlsx"
+            equipment_pdf(folder / drawing, project, rev, eq, by_tag[eq.tag], lines, routes)
+            equipment_workbook(folder / hdm, project, rev, eq, by_tag[eq.tag], lines, routes)
+            documents[rev]["equipment"][eq.tag] = {"plan": drawing, "workbook": hdm}
+        archive = f"{project.code}-dossier-{rev}.zip"
+        with ZipFile(folder / archive, "w", compression=ZIP_DEFLATED) as bundle:
+            members = [path.name, ga, data]
+            for item in documents[rev]["equipment"].values():
+                members.extend(item.values())
+            for member in members:
+                bundle.write(folder / member, arcname=member)
+        documents[rev]["archive"] = archive
+    return {
+        "id": project.id,
+        "code": project.code,
+        "name": project.name,
+        "setting": project.setting,
+        "description": project.description,
+        "preset": PRESET[project.id],
+        "equipment": [
+            {
+                "tag": item.tag,
+                "name": item.name,
+                "family": item.family,
+                "service": item.service,
+                "editFields": edit_fields(project, item.tag),
+            }
+            for item in project.equipment
+        ],
+        "lines": [
+            {
+                "tag": line.tag,
+                "start": line.start,
+                "end": line.end,
+                "fluid": line.fluid,
+                "editFields": edit_fields(project, line.tag),
+            }
+            for line in project.lines
+        ],
+        "changes": [
+            {"tag": c.tag, "label": c.label, "before": c.before, "after": c.after, "unit": c.unit}
+            for c in project.changes
+        ],
+        "states": states,
+        "documents": documents,
+    }
+
+
+def regenerate_review(project, entry):
+    """Actualiza GA, índice de cotas y GA del ZIP conservando los IFC y sus variantes."""
+    folder = OUT / project.id
+    for rev in ("A", "B"):
+        active = {change.tag for change in project.changes} if rev == "B" else set()
+        ga, index = review_documents(folder, project, rev, *scene(project, active))
+        docs = entry["documents"][rev]
+        docs.update(plan=ga, fields=index)
+        archive = folder / docs["archive"]
+        pending = archive.with_suffix(".zip.tmp")
+        with (
+            ZipFile(archive) as original,
+            ZipFile(pending, "w", compression=ZIP_DEFLATED) as output,
+        ):
+            for member in original.infolist():
+                content = (
+                    (folder / ga).read_bytes() if member.filename == ga else original.read(member)
+                )
+                output.writestr(member, content)
+        pending.replace(archive)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--solo-planos", action="store_true", help="Actualiza los GA y sus cotas.")
+    if parser.parse_args().solo_planos:
+        catalog = json.loads(INDEX.read_text(encoding="utf-8"))
+        projects = {project.id: project for project in PROJECTS}
+        for entry in catalog:
+            regenerate_review(projects[entry["id"]], entry)
+            print(f"{entry['code']}: planos A y B actualizados")
+    else:
+        catalog = [generate(project) for project in PROJECTS]
+    INDEX.parent.mkdir(parents=True, exist_ok=True)
+    INDEX.write_text(json.dumps(catalog, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    for entry in catalog:
+        state = max(entry["states"].values(), key=lambda item: item["bytes"])
+        print(
+            f"{entry['code']}: {len(entry['equipment'])} equipos, {len(entry['lines'])} líneas, "
+            f"máximo {state['bytes']:,} bytes y {state['triangles']:,} triángulos por IFC."
+        )
+
+
+if __name__ == "__main__":
+    main()

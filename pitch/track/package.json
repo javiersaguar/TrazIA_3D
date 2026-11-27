@@ -1,0 +1,31 @@
+{
+  "name": "trazia-pitch-track",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "packageManager": "pnpm@10.18.0",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "scripts": {
+    "medios": "node scripts/medios.mjs",
+    "dev": "node scripts/medios.mjs && vite --host 127.0.0.1",
+    "build": "node scripts/medios.mjs && vite build",
+    "preview": "vite preview --host 127.0.0.1 --strictPort",
+    "export": "node scripts/medios.mjs && node scripts/exportar.mjs && node scripts/guion.mjs",
+    "guion": "node scripts/guion.mjs"
+  },
+  "dependencies": {
+    "@fontsource/kanit": "5.3.0",
+    "motion": "14.6.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "three": "0.186.1",
+    "web-ifc": "0.0.78"
+  },
+  "devDependencies": {
+    "playwright-core": "1.64.1",
+    "pptxgenjs": "4.0.1",
+    "vite": "8.3.8"
+  }
+}

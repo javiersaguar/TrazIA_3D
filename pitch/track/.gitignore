@@ -1,0 +1,5 @@
+node_modules/
+dist/
+salida/
+# Planos e IFC reales del reto: se copian en local con scripts/medios.mjs y no se publican.
+public/local/

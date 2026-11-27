@@ -1,0 +1,328 @@
+"""Estrategias A/B/C/D del estudio (trazia-3d), detrás de `pipeline.process(strategy=...)`.
+
+Ingiere los documentos, ejecuta la estrategia elegida y aplica el postproceso común:
+reconciliación, calibración, contrato, familia e IFC. No lanza excepciones por datos malos.
+"""
+
+import hashlib
+import re
+import time
+from collections.abc import Callable
+from pathlib import Path
+from typing import Literal
+
+from .calibration import load_calibration
+from .extraction import Candidate, assemble
+from .ingest import IMAGE_SUFFIXES, image_to_pdf, ingest_bytes
+from .model import Revision, RunInfo, Source
+from .pipeline import InputDocument, PipelineResult
+from .reconcile import resolve
+from .reconcile.grounding import is_grounded
+from .strategies import STRATEGIES, StageEvent, StrategyContext, get_strategy
+
+__all__ = ["process"]
+
+
+KINDS = (
+    ("GAD_", "plano de disposición general"),
+    ("GA_", "plano de disposición general"),
+    ("HDM_", "hoja de datos mecánicos"),
+    ("VESOR_", "orientación de boquillas"),
+    ("ESTRUCTURA_", "estructura auxiliar"),
+)
+
+
+# Convención de nombres del dataset (pág. 12 del reto): GAD_<TAG>_rev1.pdf, HDM_<TAG>_rev1.xlsx…
+FILENAME_TAG = re.compile(r"^(?:GAD|GA|HDM|VESOR|ESTRUCTURA)_(.+?)(?:_rev[^_.]*)?\.\w+$", re.I)
+FILENAME_LOCATOR = "Nombre del archivo"
+
+
+def _tag_from_filename(bundles) -> Candidate | None:
+    """El tag cuando ningún documento lo trae escrito: el dataset llega sin cajetines.
+
+    La evidencia es el nombre del archivo, no una región de la página, y el campo pasa por la misma
+    revisión humana que cualquier otro.
+    """
+    for bundle in bundles:
+        match = FILENAME_TAG.match(bundle.document.filename)
+        if match:
+            name = bundle.document.filename
+            return Candidate(
+                path="tag",
+                value=match[1],
+                unit="1",
+                source=Source(
+                    document_id=bundle.document.id,
+                    page=1,
+                    locator=f"{FILENAME_LOCATOR}: {name}",
+                    confidence=0.6,
+                ),
+                channel="nombre_archivo",
+                text_original=name,
+                explanation="Ningún documento trae el tag escrito: sale del nombre del archivo.",
+            )
+    return None
+
+
+def _classify(filename: str) -> str | None:
+    upper = filename.upper()
+    return next((label for prefix, label in KINDS if upper.startswith(prefix)), None)
+
+
+def process(
+    documents: list[InputDocument],
+    *,
+    project_id: str,
+    equipment_id: str,
+    revision: str,
+    strategy: str = "d_hibrido",
+    previous: Revision | None = None,
+    providers: list[str] | None = None,
+    dataset: Literal["synthetic", "real"] = "synthetic",
+    on_event: Callable[[StageEvent], None] | None = None,
+    preliminary: bool = False,
+) -> PipelineResult:
+    started = time.perf_counter()
+    events: list[StageEvent] = []
+
+    def emit(event: StageEvent) -> None:
+        events.append(event)
+        if on_event:
+            on_event(event)
+
+    # RunInfo del contrato 0.3: la API lo guarda tal cual en revision.run y en la contabilidad.
+    run = RunInfo(strategy=strategy, providers=list(providers or []), seconds=0.0, external_calls=0)
+    warnings: list[str] = []
+
+    def finish(rev, candidates, error, conflicts=()):
+        run.seconds = time.perf_counter() - started
+        return PipelineResult(rev, candidates, warnings, error, run, list(conflicts))
+
+    if strategy == "d_hibrido" and strategy not in STRATEGIES:
+        # Mientras D no exista, la API sigue funcionando con B y lo dice.
+        warnings.append("La estrategia D aún no está implementada: se usa B (b_reglas).")
+        run.strategy = strategy = "b_reglas"
+    try:
+        engine = get_strategy(strategy)
+    except ValueError as exc:
+        return finish(None, [], str(exc))
+
+    bundles = []
+    raw: dict[str, bytes] = {}
+    seen: dict[str, str] = {}  # sha256 del original → nombre del primero que lo trajo
+    for doc in documents:
+        digest = hashlib.sha256(doc.data).hexdigest()
+        if digest in seen:
+            warnings.append(f"{doc.filename} es idéntico a {seen[digest]}: se lee una sola vez.")
+            emit(StageEvent("ingest", "omitido", doc.filename, f"Duplicado de {seen[digest]}."))
+            continue
+        try:
+            bundle = ingest_bytes(doc.data, doc.filename, doc.document_id, revision)
+            data = doc.data
+            if Path(doc.filename).suffix.lower() in IMAGE_SUFFIXES:
+                # Una imagen se lee como un PDF escaneado; la huella sigue siendo la del original.
+                data = image_to_pdf(doc.data)
+                name = str(Path(doc.filename).with_suffix(".pdf"))
+                image_warnings = bundle.warnings[1:]  # el aviso de imagen ya no aplica
+                bundle = ingest_bytes(data, name, doc.document_id, revision)
+                bundle.document.filename = Path(doc.filename).name
+                bundle.document.sha256 = digest
+                bundle.warnings = image_warnings + bundle.warnings
+        except Exception as exc:  # pdfminer lanza sus propias excepciones con bytes corruptos
+            reason = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+            warnings.append(f"Ingesta fallida de {doc.filename}: {reason}")
+            emit(StageEvent("ingest", "error", doc.filename, f"No se pudo leer: {reason}"))
+            continue
+        seen[digest] = doc.filename
+        raw[doc.document_id] = data
+        warnings += bundle.warnings
+        pages = bundle.document.page_count
+        emit(
+            StageEvent(
+                "ingest",
+                "ok",
+                doc.filename,
+                f"SHA-256 registrado · {pages} página(s)." if pages else "SHA-256 registrado.",
+            )
+        )
+        kind = _classify(doc.filename)
+        emit(
+            StageEvent(
+                "classify",
+                "ok" if kind else "omitido",
+                doc.filename,
+                f"Clasificado como {kind} por su nombre."
+                if kind
+                else "Nombre fuera de la convención.",
+            )
+        )
+        bundles.append(bundle)
+    if not bundles:
+        return finish(None, [], "No se pudo leer ningún documento.")
+
+    ctx = StrategyContext(
+        bundles=bundles,
+        dataset=dataset,
+        previous=previous,
+        providers=providers,
+        emit=emit,
+        raw=raw,
+        equipment_id=equipment_id,
+    )
+    try:
+        output = engine.run(ctx)
+    except Exception as exc:  # una estrategia rota no debe tumbar la API
+        emit(StageEvent("reconcile", "error", equipment_id, f"La estrategia falló: {exc}"))
+        return finish(None, [], f"La estrategia {strategy} falló: {exc}")
+    warnings += output.warnings
+    run.providers = list(output.cost.providers) or run.providers
+    run.gpu_seconds = output.cost.gpu_seconds
+    run.tokens_in, run.tokens_out = output.cost.tokens_in, output.cost.tokens_out
+    run.cost_eur, run.external_calls = output.cost.cost_eur, output.cost.external_calls
+    # Contabilidad (DEC-25): sin llamadas externas el coste en euros es cero, no desconocido.
+    # Si hubo llamadas externas y ningún proveedor informó de su coste, queda incompleta.
+    if run.cost_eur is None and run.external_calls == 0:
+        run.cost_eur = 0.0
+    run.accounting_complete = run.cost_eur is not None
+
+    candidates = _ground(output.candidates, bundles, warnings, emit, equipment_id, output.evidence)
+    if not any(c.path == "tag" for c in candidates) and (tag := _tag_from_filename(bundles)):
+        candidates.append(tag)
+        warnings.append(f"Tag tomado del nombre del archivo: {tag.value}.")
+    resolution = resolve(candidates)
+    warnings += resolution.warnings
+    emit(
+        StageEvent(
+            "reconcile",
+            "ok",
+            equipment_id,
+            f"{len(resolution.chosen)} campos · "
+            f"{len(resolution.conflicts)} conflictos para revisión.",
+        )
+    )
+    scanned = frozenset(b.document.id for b in bundles if b.media_type == "pdf" and not b.lines)
+    chosen = _calibrate(resolution.chosen, strategy, scanned, warnings, emit, equipment_id)
+
+    try:
+        model = assemble(
+            bundles,
+            chosen,
+            project_id=project_id,
+            equipment_id=equipment_id,
+            revision=revision,
+            dataset=dataset,
+            warnings=warnings,
+            preview_abstentions=True,
+            preliminary=preliminary,
+        )
+    except ValueError as exc:
+        reason = _reason(exc)
+        emit(StageEvent("family", "error", equipment_id, reason))
+        return finish(None, chosen, reason, resolution.conflicts)
+    emit(
+        StageEvent(
+            "family",
+            "ok",
+            equipment_id,
+            f"{model.equipment.kind} · LOD {model.equipment.lod} · "
+            f"{len(model.equipment.nozzles)} boquillas.",
+        )
+    )
+    try:
+        from .ifc import build_ifc
+
+        build_ifc(model, draft=True)
+        emit(StageEvent("ifc", "ok", equipment_id, "IFC4 DRAFT con GUID estables."))
+        emit(
+            StageEvent("validate", "ok", equipment_id, "Geometría válida · pendiente de revisión.")
+        )
+    except ValueError as exc:
+        emit(StageEvent("ifc", "error", equipment_id, str(exc).splitlines()[0]))
+        return finish(None, chosen, str(exc).splitlines()[0], resolution.conflicts)
+    return finish(model, chosen, None, resolution.conflicts)
+
+
+def _calibrate(
+    candidates: list[Candidate],
+    strategy: str,
+    scanned: frozenset[str],
+    warnings: list[str],
+    emit: Callable[[StageEvent], None],
+    equipment_id: str,
+) -> list[Candidate]:
+    """Etapa `calibrate` (tarea 3.3); sin parámetros ajustados queda omitida."""
+    try:
+        calibration = load_calibration()
+    except (OSError, ValueError, KeyError) as exc:
+        warnings.append(f"Calibración no aplicada: parámetros ilegibles ({exc}).")
+        emit(
+            StageEvent("calibrate", "omitido", equipment_id, "Parámetros de calibración ilegibles.")
+        )
+        return candidates
+    from .calibration.scope import for_strategy
+
+    calibration = for_strategy(calibration, strategy)
+    if calibration is None:
+        emit(
+            StageEvent(
+                "calibrate",
+                "omitido",
+                equipment_id,
+                "Sin parámetros: confianza sin calibrar (uv run python -m bench.calibrar).",
+            )
+        )
+        return candidates
+    calibrated, summary = calibration.apply(candidates, strategy, scanned)
+    if summary["abstained"]:
+        warnings.append(
+            f"{summary['abstained']} campos con confianza baja quedan en abstención para revisión."
+        )
+    emit(
+        StageEvent(
+            "calibrate",
+            "ok",
+            equipment_id,
+            f"Isotónica · {summary['intervals']} intervalos al {calibration.level:.0%} · "
+            f"{summary['abstained']} abstenciones.",
+        )
+    )
+    return calibrated
+
+
+def _reason(exc: Exception) -> str:
+    """Frase útil de un error: de una validación de Pydantic, la causa y no la cabecera."""
+    lines = [line.strip() for line in str(exc).splitlines() if line.strip()]
+    for line in lines:
+        if line.startswith("Value error,"):
+            return line.removeprefix("Value error,").split(" [type=")[0].strip()
+    return lines[0] if lines else type(exc).__name__
+
+
+# Canales cuyos valores salen de un modelo: si su cita no los respalda, no entran (DEC-10).
+MODEL_CHANNELS = {"vision", "detector", "rag"}
+
+
+def _ground(candidates, bundles, warnings, emit, equipment_id, evidence=None):
+    """Marca `grounded` en cada candidato y descarta los de modelo que su cita no respalda."""
+    lines = {b.document.id: b.lines or (evidence or {}).get(b.document.id, []) for b in bundles}
+    kept, dropped = [], []
+    for c in candidates:
+        if c.grounded is None and c.source.document_id in lines:
+            c = c.model_copy(update={"grounded": is_grounded(c, lines[c.source.document_id])})
+        if c.grounded is False and c.channel in MODEL_CHANNELS:
+            dropped.append(c)
+            continue
+        kept.append(c)
+    if dropped:
+        paths = ", ".join(sorted({c.path for c in dropped})[:5])
+        warnings.append(f"{len(dropped)} lecturas de modelo sin respaldo en su cita: {paths}")
+    emit(
+        StageEvent(
+            "validate",
+            "ok",
+            equipment_id,
+            f"Cita comprobada · {len(dropped)} valores de modelo descartados por no estar "
+            "en su región.",
+        )
+    )
+    return kept

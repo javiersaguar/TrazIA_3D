@@ -1,0 +1,162 @@
+{
+  "dataset": "sintético",
+  "date": "2026-11-26",
+  "sha256": "e438d8584320124b4ba59698b16baba22555b695b665611a12afb4a5d9954721",
+  "priceSources": [
+    "https://developers.openai.com/api/docs/pricing",
+    "https://platform.claude.com/docs/en/about-claude/pricing"
+  ],
+  "tasks": {
+    "vision": {
+      "selected": "claude-sonnet-5-5",
+      "points": [
+        {
+          "id": "gpt-6-luna",
+          "name": "GPT-6 Luna",
+          "correct": 76,
+          "fields": 76,
+          "wrong": 0,
+          "abstained": 4,
+          "absent": 4,
+          "failures": 0,
+          "calls": 20,
+          "seconds": 5.9921,
+          "usd": 0.00021102500000000002
+        },
+        {
+          "id": "gpt-6.1-sol",
+          "name": "GPT-6.1 Sol",
+          "correct": 72,
+          "fields": 76,
+          "wrong": 0,
+          "abstained": 4,
+          "absent": 4,
+          "failures": 0,
+          "calls": 20,
+          "seconds": 2.96485,
+          "usd": 0.00216
+        },
+        {
+          "id": "claude-haiku-5-5",
+          "name": "Haiku 5.5",
+          "correct": 71,
+          "fields": 76,
+          "wrong": 0,
+          "abstained": 4,
+          "absent": 4,
+          "failures": 0,
+          "calls": 20,
+          "seconds": 3.1418,
+          "usd": 0.0003167
+        },
+        {
+          "id": "claude-sonnet-5-5",
+          "name": "Sonnet 5.5",
+          "correct": 76,
+          "fields": 76,
+          "wrong": 0,
+          "abstained": 4,
+          "absent": 4,
+          "failures": 0,
+          "calls": 20,
+          "seconds": 1.89215,
+          "usd": 0.0027210000000000003
+        },
+        {
+          "id": "claude-opus-5-5",
+          "name": "Opus 5.5",
+          "correct": 76,
+          "fields": 76,
+          "wrong": 0,
+          "abstained": 4,
+          "absent": 4,
+          "failures": 0,
+          "calls": 20,
+          "seconds": 2.5118,
+          "usd": 0.0056630000000000005
+        }
+      ]
+    },
+    "texto": {
+      "selected": "gpt-6-luna",
+      "points": [
+        {
+          "id": "gpt-6-luna",
+          "name": "GPT-6 Luna",
+          "correct": 40,
+          "fields": 40,
+          "wrong": 0,
+          "abstained": 0,
+          "absent": 0,
+          "failures": 0,
+          "calls": 40,
+          "seconds": 2.5332,
+          "usd": 7.09625e-05
+        },
+        {
+          "id": "gpt-6.1-sol",
+          "name": "GPT-6.1 Sol",
+          "correct": 40,
+          "fields": 40,
+          "wrong": 0,
+          "abstained": 0,
+          "absent": 0,
+          "failures": 0,
+          "calls": 40,
+          "seconds": 2.49375,
+          "usd": 0.00064275
+        },
+        {
+          "id": "claude-haiku-5-5",
+          "name": "Haiku 5.5",
+          "correct": 40,
+          "fields": 40,
+          "wrong": 0,
+          "abstained": 0,
+          "absent": 0,
+          "failures": 0,
+          "calls": 40,
+          "seconds": 1.816,
+          "usd": 0.0001434
+        },
+        {
+          "id": "claude-sonnet-5-5",
+          "name": "Sonnet 5.5",
+          "correct": 40,
+          "fields": 40,
+          "wrong": 0,
+          "abstained": 0,
+          "absent": 0,
+          "failures": 0,
+          "calls": 40,
+          "seconds": 2.19185,
+          "usd": 0.0022035
+        },
+        {
+          "id": "claude-opus-5-5",
+          "name": "Opus 5.5",
+          "correct": 39,
+          "fields": 40,
+          "wrong": 0,
+          "abstained": 0,
+          "absent": 0,
+          "failures": 0,
+          "calls": 40,
+          "seconds": 1.783,
+          "usd": 0.003288
+        }
+      ]
+    }
+  },
+  "projection": {
+    "calls": 430,
+    "revisions": 20,
+    "measuredCalls": 86,
+    "measuredRevisions": 4,
+    "central": 0.6185767261168992,
+    "optimistic": 0.6298010973936901,
+    "lower": 0.6080174133865409,
+    "solUsd": 0.9288,
+    "opusUsd": 2.43509
+  }
+}

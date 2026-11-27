@@ -1,0 +1,262 @@
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+from .model import Revision, load_revision
+from .revisions import compare
+
+
+def write_json(data: dict, path: Path | None):
+    content = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+    if path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    else:
+        print(content, end="")
+
+
+def main(argv=None) -> int:
+    from trazia.runtime import configure_offline
+
+    configure_offline()
+    parser = argparse.ArgumentParser(
+        description="TrazIA-3D: del plano al modelo, con cada cambio trazado"
+    )
+    commands = parser.add_subparsers(dest="command", required=True)
+    migrate = commands.add_parser("migrate", help="Migrar un contrato 0.2 a 0.3 (DRAFT)")
+    migrate.add_argument("input", type=Path)
+    migrate.add_argument("--output", "-o", type=Path, required=True)
+    validate = commands.add_parser("validate", help="Validar contrato y estado de revisión")
+    validate.add_argument("input", type=Path)
+    export = commands.add_parser("export", help="Exportar IFC4, IFC4X3 o IFC2X3")
+    export.add_argument("input", type=Path)
+    export.add_argument("--output", "-o", type=Path, required=True)
+    export.add_argument("--draft", action="store_true")
+    export.add_argument("--schema", choices=("IFC4", "IFC4X3", "IFC2X3"), default="IFC4")
+    table = commands.add_parser("fields", help="Exportar campos con evidencia a CSV o Excel")
+    table.add_argument("input", type=Path)
+    table.add_argument("--output", "-o", type=Path, required=True)
+    geometry = commands.add_parser(
+        "compare-ifc", help="Distancias de superficie por GUID (extra geo)"
+    )
+    geometry.add_argument("before", type=Path)
+    geometry.add_argument("after", type=Path)
+    geometry.add_argument("--samples", type=int, default=1024)
+    geometry.add_argument("--match", choices=("guid", "name"), default="guid")
+    geometry.add_argument("--output", "-o", type=Path)
+    ifc_validation = commands.add_parser("validate-ifc", help="Validar IFC y reglas EXPRESS")
+    ifc_validation.add_argument("input", type=Path)
+    diff = commands.add_parser("diff", help="Comparar revisiones y evidencia")
+    diff.add_argument("before", type=Path)
+    diff.add_argument("after", type=Path)
+    diff.add_argument("--output", "-o", type=Path)
+    diff.add_argument("--geometry", action="store_true")
+    diff.add_argument("--format", choices=("json", "markdown"), default=None)
+    bcf = commands.add_parser("bcf", help="Exportar cambios como BCF 2.1 DRAFT")
+    bcf.add_argument("before", type=Path)
+    bcf.add_argument("after", type=Path)
+    bcf.add_argument("--output", "-o", type=Path, required=True)
+    schema = commands.add_parser("schema", help="Emitir JSON Schema")
+    schema.add_argument("--output", "-o", type=Path)
+    ingest = commands.add_parser("ingest", help="Leer PDF/XLSX/imagen y catalogar evidencia")
+    ingest.add_argument("input", type=Path)
+    ingest.add_argument("--id", required=True)
+    ingest.add_argument("--revision", required=True)
+    ingest.add_argument("--output", "-o", type=Path, required=True)
+    extract = commands.add_parser("extract", help="Ejecutar el lector sobre documentos ingeridos")
+    extract.add_argument("bundles", nargs="+", type=Path)
+    extract.add_argument("--project", required=True)
+    extract.add_argument("--equipment", required=True)
+    extract.add_argument("--revision", required=True)
+    extract.add_argument("--synthetic", action="store_true")
+    extract.add_argument("--output", "-o", type=Path, required=True)
+    approval = commands.add_parser(
+        "approve", help="Registrar revisión humana y verificar originales"
+    )
+    approval.add_argument("input", type=Path)
+    approval.add_argument("--reviewer", required=True)
+    approval.add_argument(
+        "--original", action="append", required=True, help="ID=ruta del documento"
+    )
+    approval.add_argument("--output", "-o", type=Path, required=True)
+    serve = commands.add_parser("serve", help="Abrir el espacio de revisión local")
+    serve.add_argument("--port", type=int, default=8501)
+    batch = commands.add_parser("lote", help="Procesar una carpeta por equipo y revisión")
+    batch.add_argument("entrada", type=Path)
+    batch.add_argument("--output", "-o", type=Path, required=True)
+    batch.add_argument("--proyecto", default="INDESIAHACK")
+    batch.add_argument("--dataset", choices=("real", "synthetic"), default="real")
+    batch.add_argument("--proveedor", action="append", dest="proveedores")
+    batch.add_argument("--tag", action="append", dest="tags")
+    batch.add_argument("--procesos", type=int, default=1)
+    batch.add_argument("--trabajo", type=Path, help="Carpeta de cachés (por defecto, en la salida)")
+    batch.add_argument("--evidencias", type=Path, help="JSON local de cotas cotejadas por SHA-256")
+    profile = commands.add_parser(
+        "perfil", help="Recuentos agregados de una carpeta de documentos, sin nombres ni textos"
+    )
+    profile.add_argument("entrada", type=Path)
+    profile.add_argument("--max-paginas", type=int, default=30)
+    profile.add_argument("--output", "-o", type=Path)
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "schema":
+            write_json(Revision.model_json_schema(), args.output)
+        elif args.command == "migrate":
+            write_json(load_revision(args.input).model_dump(mode="json"), args.output)
+        elif args.command == "validate":
+            revision = load_revision(args.input)
+            write_json(
+                {
+                    "valid": True,
+                    "dataset": revision.dataset,
+                    "approved": revision.approval is not None,
+                    "pending_review": revision.pending_review(),
+                },
+                None,
+            )
+        elif args.command == "fields":
+            from .review import export_fields
+
+            destination = export_fields(load_revision(args.input), args.output)
+            print(f"Tabla de campos: {destination}")
+        elif args.command == "compare-ifc":
+            from .families.metrics import compare_ifc
+
+            write_json(
+                compare_ifc(args.before, args.after, samples=args.samples, match=args.match),
+                args.output,
+            )
+        elif args.command == "validate-ifc":
+            from .ifc import validate_ifc
+
+            issues = validate_ifc(args.input)
+            write_json({"valid": not issues, "issues": issues}, None)
+            return 1 if issues else 0
+        elif args.command == "bcf":
+            from .bcf import export_bcf
+
+            payload = export_bcf(load_revision(args.before), load_revision(args.after))
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_bytes(payload)
+            print(f"BCF DRAFT: {args.output}")
+        elif args.command == "diff":
+            before, after = load_revision(args.before), load_revision(args.after)
+            result = compare(before, after, include_geometry=args.geometry)
+            markdown = args.format == "markdown" or (
+                args.format is None and args.output and args.output.suffix.lower() == ".md"
+            )
+            if markdown:
+                from .revisions import markdown_report
+
+                content = markdown_report(before, after, result)
+                if args.output:
+                    args.output.parent.mkdir(parents=True, exist_ok=True)
+                    args.output.write_text(content, encoding="utf-8")
+                else:
+                    print(content, end="")
+            else:
+                write_json(result, args.output)
+        elif args.command == "ingest":
+            from .ingest import ingest_bytes
+
+            bundle = ingest_bytes(args.input.read_bytes(), args.input.name, args.id, args.revision)
+            write_json(bundle.model_dump(mode="json"), args.output)
+        elif args.command == "extract":
+            from .extraction import assemble
+            from .ingest import Bundle
+            from .lectura import leer
+            from .pipeline import _tag_from_filename
+
+            bundles = [
+                Bundle.model_validate_json(p.read_text(encoding="utf-8")) for p in args.bundles
+            ]
+            dataset = "synthetic" if args.synthetic else "real"
+            candidates = leer(bundles, raw={}, dataset=dataset)
+            if not any(c.path == "tag" for c in candidates) and (
+                tag := _tag_from_filename(bundles)
+            ):
+                candidates.append(tag)
+            revision = assemble(
+                bundles,
+                candidates,
+                project_id=args.project,
+                equipment_id=args.equipment,
+                revision=args.revision,
+                dataset=dataset,
+            )
+            write_json(revision.model_dump(mode="json"), args.output)
+        elif args.command == "approve":
+            from .review import approve
+
+            originals = {}
+            for item in args.original:
+                key, separator, path = item.partition("=")
+                if not separator:
+                    raise ValueError("Original debe tener formato ID=ruta")
+                originals[key] = Path(path).read_bytes()
+            revision = approve(load_revision(args.input), args.reviewer, originals)
+            write_json(revision.model_dump(mode="json"), args.output)
+        elif args.command == "lote":
+            from .lote import procesar_carpeta
+
+            filas = procesar_carpeta(
+                args.entrada,
+                args.output,
+                proyecto=args.proyecto,
+                proveedores=args.proveedores,
+                dataset=args.dataset,
+                trabajo=args.trabajo,
+                procesos=args.procesos,
+                tags=args.tags,
+                evidencias=args.evidencias,
+            )
+            fallos = [f for f in filas if f.estado != "ok"]
+            parciales = [f for f in filas if f.estado == "ok" and f.documentos_con_error]
+            print(
+                f"Lote: {len(filas) - len(fallos)} de {len(filas)} revisiones correctas. "
+                f"Resumen en {args.output / 'resumen.csv'}"
+            )
+            # Un documento que no se lee no puede pasar por «correcta» sin que nadie lo vea.
+            for f in parciales:
+                print(
+                    f"Aviso: {f.tag} rev{f.revision} siguió sin "
+                    + ", ".join(f.documentos_con_error)
+                )
+            return 1 if fallos or parciales or not filas else 0
+        elif args.command == "perfil":
+            from .perfil import avisos, perfilar
+
+            perfil = perfilar(args.entrada, max_paginas=args.max_paginas)
+            write_json({**perfil, "avisos": avisos(perfil)}, args.output)
+        elif args.command == "serve":
+            app = Path(__file__).with_name("app.py")
+            return subprocess.call(
+                [
+                    sys.executable,
+                    "-m",
+                    "streamlit",
+                    "run",
+                    str(app),
+                    "--server.port",
+                    str(args.port),
+                    "--server.address",
+                    "127.0.0.1",
+                    "--server.headless",
+                    "true",
+                    "--browser.gatherUsageStats",
+                    "false",
+                ]
+            )
+        else:
+            from .ifc import export_ifc
+
+            destination = export_ifc(
+                load_revision(args.input), args.output, draft=args.draft, schema=args.schema
+            )
+            print(f"IFC generado: {destination}")
+    except (OSError, ValueError) as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 2
+    return 0

@@ -1,0 +1,135 @@
+.session {
+  display: grid;
+  gap: 0.8rem;
+  padding-bottom: 0.8rem;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface-sunken);
+}
+
+.stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: clamp(12rem, 35vh, 20rem);
+  isolation: isolate;
+  background: radial-gradient(ellipse at 50% 48%, #123552 0%, #101d30 37%, #080e18 79%);
+  transition: height 240ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* Con conversación en marcha el avatar se reduce y deja sitio al hilo del chat. */
+.session[data-compact="true"] .stage {
+  height: clamp(6rem, 16vh, 9rem);
+}
+
+/* En pantallas altas el avatar y los controles quedan fijos mientras el hilo avanza debajo. */
+@media (min-height: 760px) {
+  .session {
+    position: sticky;
+    z-index: 1;
+    top: -1rem;
+  }
+}
+
+.stage::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  content: "";
+  background-image: radial-gradient(circle, #96d8ff55 0.8px, transparent 1px);
+  background-size: 16px 16px;
+  mask-image: radial-gradient(ellipse, transparent 18%, #000 53%, transparent 79%);
+  opacity: 0.55;
+}
+
+.placeholder {
+  width: 38%;
+  max-width: 6.5rem;
+  filter: drop-shadow(0 0 1rem #38bfff80);
+}
+
+.status {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.status span {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.stage:is([data-state="listening"], [data-state="speaking"]) + .status span {
+  background: var(--accent);
+}
+
+.stage[data-state="thinking"] + .status span {
+  background: var(--warning);
+}
+
+.said,
+.live {
+  width: fit-content;
+  max-width: 88%;
+  margin-left: auto;
+  padding: 0.625rem 0.75rem;
+  border-radius: 0.75rem 0.25rem 0.75rem 0.75rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.said {
+  background: var(--accent-soft);
+}
+
+/* Lo que se va reconociendo: provisional hasta la pausa que cierra el turno. */
+.live {
+  border: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent-soft) 45%, transparent);
+}
+
+.live[data-empty="true"] {
+  color: var(--text-muted);
+}
+
+.live::after {
+  display: inline-block;
+  width: 0.4rem;
+  height: 0.4rem;
+  margin-left: 0.4rem;
+  border-radius: 50%;
+  background: var(--accent);
+  content: "";
+  vertical-align: middle;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .live::after {
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+
+  .said {
+    animation: settle 200ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@keyframes settle {
+  from {
+    opacity: 0.6;
+    transform: translateY(4px);
+  }
+}

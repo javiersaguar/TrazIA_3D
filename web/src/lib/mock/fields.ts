@@ -1,0 +1,206 @@
+import type { Revision, Source } from "@/lib/types/revision";
+import { fieldLabel } from "@/lib/field-labels";
+
+/** Estado de revisión humana de un campo en la UI. */
+export type FieldStatus = "candidate" | "accepted" | "corrected" | "assumed";
+
+export type FieldGroup = "Identificación" | "Envolvente" | "Soporte" | "Boquillas" | "Datos de diseño";
+
+/**
+ * Ids semánticos compartidos entre plano, 3D y lista de campos.
+ * Correspondencia con el IFC generado por el núcleo (atributo Name):
+ *   "shell"       ↔ IfcTank "V-101"
+ *   "head-top"    ↔ "V-101/top_head"
+ *   "head-bottom" ↔ "V-101/bottom_head"
+ *   "skirt"       ↔ "V-101/skirt"
+ *   "nozzle:N1"   ↔ IfcPipeSegment "V-101/N1"
+ */
+export type ElementId = "shell" | "head-top" | "head-bottom" | "skirt" | `nozzle:${string}`;
+
+export type ReviewField = {
+  /** Auditoría de la última escritura confirmada, utilizada para deshacer en la API. */
+  auditId?: number;
+  saveWarning?: string;
+  snapshot?: Record<string, unknown>;
+  /** Ruta en el contrato, p. ej. "nozzles.N3.elevation". */
+  path: string;
+  label: string;
+  group: FieldGroup;
+  elementId: ElementId;
+  value: number | string;
+  unit: string;
+  source: Source;
+  confidence: number;
+  /** Peso 0–1 del daño que haría un error en este campo (reglas del roadmap E.2). */
+  impact: number;
+  /** impacto × (1 − confianza): ordena la cola de revisión. */
+  risk: number;
+  status: FieldStatus;
+  correctedValue?: number | string;
+  /** Intervalo conforme del valor leído (etapa `calibrate`), si es numérico. */
+  interval?: { low: number; high: number; level: number } | null;
+  /** Confianza calibrada bajo el umbral de riesgo: hay que confirmarlo a mano (DEC-12). */
+  abstained: boolean;
+  conflict?: boolean;
+  /** La confianza viene de la etapa `calibrate`, no directamente de la estrategia. */
+  calibrated: boolean;
+  explanation?: string | null;
+};
+
+const DIMENSIONS = [
+  { key: "diameter", label: "Diámetro de la virola", group: "Envolvente", elementId: "shell", impact: 1 },
+  { key: "height", label: "Longitud entre tangentes", group: "Envolvente", elementId: "shell", impact: 0.9 },
+  { key: "head_depth", label: "Altura de los fondos", group: "Envolvente", elementId: "head-top", impact: 0.6 },
+  { key: "skirt_height", label: "Altura del faldón", group: "Soporte", elementId: "skirt", impact: 0.8 },
+  { key: "skirt_thickness", label: "Espesor del faldón", group: "Soporte", elementId: "skirt", impact: 0.5 },
+] as const;
+
+const NOZZLE_FIELDS = [
+  { key: "elevation", label: "elevación", impact: 1 },
+  { key: "azimuth", label: "orientación", impact: 1 },
+  { key: "diameter", label: "diámetro", impact: 0.7 },
+  { key: "projection", label: "proyección", impact: 0.6 },
+] as const;
+
+const HORIZONTAL_FIELDS = [
+  { key: "diameter", label: "Diámetro exterior de la virola", elementId: "shell", impact: 1 },
+  { key: "length", label: "Longitud entre tangentes", elementId: "shell", impact: 0.9 },
+  { key: "head_depth", label: "Profundidad del fondo", elementId: "head-top", impact: 0.6 },
+  { key: "support_height", label: "Altura del suelo a la virola", elementId: "shell", impact: 0.8 },
+] as const;
+
+const ATTRIBUTE_LABELS: Record<string, { label: string; impact: number }> = {
+  design_pressure: { label: "Presión de diseño", impact: 0.5 },
+  design_temperature: { label: "Temperatura de diseño", impact: 0.5 },
+  material: { label: "Material", impact: 0.4 },
+  operating_weight: { label: "Peso de operación", impact: 0.7 },
+};
+
+function field(
+  path: string,
+  label: string,
+  group: FieldGroup,
+  elementId: ElementId,
+  impact: number,
+  data: {
+    value: number | string;
+    unit?: string;
+    source: Source;
+    state?: string;
+    interval?: { low: number; high: number; level: number } | null;
+    explanation?: string | null;
+  },
+): ReviewField {
+  const confidence = data.source.confidence;
+  const abstained = data.state === "abstained";
+  return {
+    snapshot: data as unknown as Record<string, unknown>,
+    path,
+    label,
+    group,
+    elementId,
+    value: data.value,
+    unit: data.unit ?? "1",
+    source: data.source,
+    confidence,
+    impact,
+    // Un campo abstenido va antes que cualquier otro: no se puede aprobar sin confirmarlo.
+    risk: impact * (1 - confidence) + (abstained || data.state === "conflict" ? 1 : 0),
+    interval: data.interval ?? null,
+    abstained,
+    conflict: data.state === "conflict",
+    calibrated: data.source.channel !== "humano" && data.source.confidence_raw != null && data.source.confidence_raw !== confidence,
+    explanation: data.explanation ?? null,
+    status: data.state === "corrected" || data.state === "assumed" ? data.state : data.state === "accepted" || data.source.reviewed ? "accepted" : "candidate",
+  };
+}
+
+/** Aplana una revisión del contrato en la lista de campos revisables, ordenada por riesgo. */
+export function flattenRevision(revision: Revision): ReviewField[] {
+  const eq = revision.equipment;
+  const out: ReviewField[] = [field("tag", fieldLabel("tag"), "Identificación", "shell", 0.4, eq.tag)];
+
+  for (const d of DIMENSIONS) {
+    const dimension = eq[d.key];
+    if (dimension) out.push(field(d.key, fieldLabel(d.key), d.group, d.elementId, d.impact, dimension));
+  }
+
+  if (eq.horizontal) for (const d of HORIZONTAL_FIELDS) {
+    const dimension = eq.horizontal[d.key];
+    if (dimension) out.push(field(`horizontal.${d.key}`, fieldLabel(`horizontal.${d.key}`), "Envolvente", d.elementId, d.impact, dimension));
+  }
+
+  if (eq.envelope) {
+    for (const part of ["origin", "size"] as const) {
+      for (const axis of ["x", "y", "z"] as const) {
+        out.push(field(`envelope.${part}.${axis}`, `${part === "origin" ? "Origen" : "Dimensión"} ${axis.toUpperCase()}`,
+          "Envolvente", "shell", 0.8, eq.envelope[part][axis]));
+      }
+    }
+  }
+
+  for (const nozzle of eq.nozzles) {
+    for (const f of NOZZLE_FIELDS) {
+      out.push(
+        field(
+          `nozzles.${nozzle.id}.${f.key}`,
+          fieldLabel(`nozzles.${nozzle.id}.${f.key}`),
+          "Boquillas",
+          `nozzle:${nozzle.id}`,
+          f.impact,
+          nozzle[f.key],
+        ),
+      );
+    }
+  }
+
+  for (const [key, attr] of Object.entries(eq.attributes ?? {})) {
+    if (!attr) continue;
+    const meta = ATTRIBUTE_LABELS[key] ?? { label: key, impact: 0.4 };
+    out.push(field(`attributes.${key}`, fieldLabel(`attributes.${key}`), "Datos de diseño", "shell", meta.impact, attr));
+  }
+
+  const known = new Set(out.map((f) => f.path));
+  function visit(value: unknown, path: string) {
+    if (!value || typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    if ("value" in record && "source" in record) {
+      if (!known.has(path) && (typeof record.value === "string" || typeof record.value === "number")) {
+        const data = record as unknown as Parameters<typeof field>[5];
+        out.push(field(path, fieldLabel(path), "Envolvente", elementForPath(path), 0.8, data));
+      }
+      return;
+    }
+    if (Array.isArray(value)) value.forEach((item, i) => visit(item, `${path}.${item?.id ?? i}`));
+    else Object.entries(record).forEach(([key, child]) => visit(child, path ? `${path}.${key}` : key));
+  }
+  visit(eq, "");
+  return out.sort(compareRisk);
+}
+
+export function isPreliminary({ source, status }: Pick<ReviewField, "source" | "status">) {
+  return status !== "corrected" && "rule" in source && typeof source.rule === "string" && source.rule.startsWith("preliminar.");
+}
+
+export const isDesignValue = ({ source }: Pick<ReviewField, "source">) => source.channel === "diseno" || !!source.design;
+
+export const compareRisk = (a: ReviewField, b: ReviewField) => Number(isPreliminary(b)) - Number(isPreliminary(a)) || b.risk - a.risk || b.impact - a.impact || a.path.localeCompare(b.path);
+/** La API aprobó el campo sola por su confianza (src/trazia/api/auto_approval.py); se puede revocar. */
+export const isAutoApproved = (field: Pick<ReviewField, "status" | "explanation">) =>
+  field.status === "accepted" && !!field.explanation?.startsWith("Aprobado automáticamente");
+
+export const isResolved = (field: Pick<ReviewField, "status">) => field.status === "accepted" || field.status === "corrected";
+
+export function riskLevel(f: Pick<ReviewField, "impact">): "alto" | "medio" | "bajo" {
+  if (f.impact >= 0.9) return "alto";
+  if (f.impact >= 0.6) return "medio";
+  return "bajo";
+}
+
+/** Elemento 3D afectado por una ruta del contrato (también para los cambios). */
+export function elementForPath(path: string): ElementId {
+  if (path.startsWith("nozzles.")) return `nozzle:${path.split(".")[1] ?? ""}`;
+  if (path.startsWith("skirt")) return "skirt";
+  if (path === "head_depth" || path === "horizontal.head_depth") return "head-top";
+  return "shell";
+}

@@ -1,0 +1,57 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "trazia-3d"
+version = "0.2.0"
+description = "TrazIA-3D: del plano al modelo, con cada cambio trazado"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "pydantic>=2.11,<3",
+  "ifcopenshell>=0.8.3,<0.9",
+  "pdfplumber>=0.11,<1",
+  "openpyxl>=3.1,<4",
+  "pillow>=11,<13",
+  "streamlit>=1.50,<2",
+  "plotly>=6,<7",
+  "pint>=0.24,<1",
+  "scipy>=1.14,<2",
+  "scikit-learn>=1.5,<2",
+]
+
+[project.optional-dependencies]
+api = [
+  "trazia-3d[geo]",
+  "reportlab>=4,<5", # Planos GA vectoriales derivados del IFC. Ya fijado en dev.
+  "pytest>=8,<10", # IfcOpenShell EXPRESS usa _pytest.assertion en producción.
+  "fastapi>=0.115,<1", "sqlmodel>=0.0.24,<0.1", "alembic>=1.15,<2",
+  "uvicorn>=0.34,<1", "python-multipart>=0.0.20,<1", "httpx>=0.28,<1",
+  "arq>=0.26,<1", "psycopg[binary]>=3.2,<4",
+]
+geo = ["trimesh>=4.6,<5", "scipy>=1.15,<2", "rtree>=1.4,<2", "pint>=0.24,<1", "opencv-python-headless>=4.11,<5"]
+dev = ["pytest>=8,<10", "ruff>=0.11,<1", "reportlab>=4,<5"]
+ocr = [
+    "onnxruntime>=1.20,<2",
+    "rapidocr>=3,<4",
+]
+[project.scripts]
+trazia = "trazia.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/trazia"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+# Skills de terceros para los asistentes: no son código del proyecto.
+extend-exclude = [".claude", ".agents"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.format]
+exclude = ["*.md"]

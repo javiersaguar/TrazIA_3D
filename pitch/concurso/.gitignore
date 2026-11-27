@@ -1,0 +1,5 @@
+node_modules/
+dist/
+salida/
+# Vídeo de la interfaz (61 MB): se copia a mano, no se publica.
+public/local/

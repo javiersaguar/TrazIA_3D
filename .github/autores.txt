@@ -1,0 +1,2 @@
+# Identidades públicas autorizadas para los commits en GitHub.
+241634684+javiersaguar@users.noreply.github.com
