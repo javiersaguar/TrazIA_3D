@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 from sqlmodel import Session
 
 from trazia.api.accounts import ADMINS, sync_local_owner_password
@@ -29,6 +30,16 @@ def settings(monkeypatch, tmp_path):
     monkeypatch.setenv("TRAZIA_USUARIOS", "revisor")
     monkeypatch.setenv("TRAZIA_CORS_ORIGINS", "http://localhost:3120")
     return tmp_path, secret
+
+
+@pytest.fixture()
+def fotos_equipo(monkeypatch, tmp_path):
+    carpeta = tmp_path / "fotos-de-prueba"
+    carpeta.mkdir()
+    foto = Image.new("RGB", (1, 1), "blue")
+    for username in ADMINS:
+        foto.save(carpeta / f"{username}.jpg")
+    monkeypatch.setattr("trazia.api.accounts.TEAM_PHOTOS", carpeta)
 
 
 def _login(client, user, secret):
@@ -65,6 +76,7 @@ def test_foto_de_perfil(settings):
 
 
 @pytest.mark.parametrize("acceso", ["miguel.vera", "revisor", "invitado"])
+@pytest.mark.usefixtures("fotos_equipo")
 def test_cada_sesion_ve_las_fotos_del_equipo(settings, acceso):
     tmp, secret = settings
     with TestClient(create_app(data_root=tmp / "data", seed=False)) as client:
@@ -82,6 +94,7 @@ def test_cada_sesion_ve_las_fotos_del_equipo(settings, acceso):
             assert perfil["avatar"] == fotos["miguel.vera"]
 
 
+@pytest.mark.usefixtures("fotos_equipo")
 def test_la_foto_subida_sustituye_a_la_del_equipo(settings):
     tmp, secret = settings
     with TestClient(create_app(data_root=tmp / "data", seed=False)) as client:
@@ -139,6 +152,7 @@ def test_el_resto_de_cuentas_no_puede_cambiar_el_rol(settings, username):
         assert client.get("/auth/session").json()["role"] == login.json()["role"]
 
 
+@pytest.mark.usefixtures("fotos_equipo")
 def test_el_cambio_de_cuenta_pide_su_password_y_conserva_la_foto(settings):
     tmp, secret = settings
     with TestClient(create_app(data_root=tmp / "data", seed=False)) as client:
