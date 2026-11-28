@@ -28,6 +28,7 @@ import { EvidenceLink } from "./evidence-link";
 import { useFieldAction } from "./use-field-action";
 import type { FieldFilter } from "./queue-header";
 import { NozzleSummary, type NozzleEvidence } from "./nozzle-summary";
+import { AssumptionEmailDialog } from "./assumption-email-dialog";
 
 const ReviewLayout = dynamic(
   () => import("./review-layout").then((m) => m.ReviewLayout),
@@ -104,7 +105,7 @@ export function ReviewWorkspace() {
   // Teclado de revisión: J/K, A, E, S, Ctrl+Z
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (editingPath || isTyping(e.target)) return;
+      if (editingPath || isTyping(e.target) || (e.target instanceof Element && e.target.closest('[role="dialog"]'))) return;
       const ui = useUi.getState();
       if (ui.commandOpen || ui.shortcutsOpen) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
@@ -202,6 +203,8 @@ export function ReviewWorkspace() {
               onSelect={path => { selectCheck(path); close(); }}
               onMark={mark => { selectMark(mark); close(); }} />
           </>}</ReviewChecks> : null}
+          {revisionData && <AssumptionEmailDialog key={`email:${reviewId}`} fields={fields} documents={revisionData.documents} busy={busy}
+            scope={{ tag: revisionData.equipment.tag.value, project: revisionData.project_id, revision: revisionData.revision }} />}
           <ApprovalButton key={revision} revision={revision} fields={fields} />
         </>}
         pdf={
