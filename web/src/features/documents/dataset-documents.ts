@@ -1,4 +1,5 @@
 import type { EquipmentRow } from "@/lib/mock/api";
+import type { Design } from "./catalogue";
 
 export type LotRow = {
   proyecto?: string;
@@ -14,7 +15,14 @@ export type LotRow = {
 };
 
 type RevisionModel = { identity: string; ifc: string };
-export type ListedDocument = { filename: string; revision: string; id?: string; model?: RevisionModel };
+export type CatalogueModel = {
+  name: string;
+  ifc?: string;
+  demoRevision?: "A" | "B";
+  documentId?: string;
+  published?: boolean;
+};
+export type ListedDocument = { filename: string; revision: string; id?: string; model?: RevisionModel; design?: Design };
 
 export type GroupedRevision = {
   project: string;
@@ -22,6 +30,7 @@ export type GroupedRevision = {
   revision: string;
   source?: LotRow;
   model?: RevisionModel;
+  localModel?: CatalogueModel;
   version: number | null;
   approved: boolean;
   lod?: number | null;
@@ -93,6 +102,11 @@ export function groupDatasetDocuments(lot: LotRow[], equipment: EquipmentRow[]) 
 }
 
 export type DatasetGroup = ReturnType<typeof groupDatasetDocuments>[number];
+export type EquipmentGroup = DatasetGroup & { local?: true; projectLabel?: string };
+
+export function latestModel(group: EquipmentGroup) {
+  return group.revisions.findLast((revision) => revision.model || revision.localModel);
+}
 
 /** Claves de código que aparecen en más de una ficha: ahí la tarjeta muestra el proyecto. */
 export function homonymTags(groups: { tag: string }[]) {

@@ -293,23 +293,27 @@ test("movimiento reducido deja el inicio de sesión visible sin la intro",async(
 test("Documentos reúne documentos, proyectos y familias y acepta soltar archivos",async({page})=>{
   test.skip(Boolean(process.env.NEXT_PUBLIC_API_URL), "Esta prueba comprueba el catálogo o laboratorio de la demo sin API.");
  await page.goto("/documentos?vista=documentos");
+ await page.getByText("Subir planos", { exact: true }).click();
  await expect(page.getByText("Suelta aquí los planos GA y las hojas de datos")).toBeVisible();
  await page.getByLabel("Familia de destino").selectOption({label:"Intercambiadores"});
  await page.getByTestId("document-dropzone").evaluate(zone=>{
   const dt=new DataTransfer();dt.items.add(new File(["synthetic"],"GAD_E-210_revA.pdf",{type:"application/pdf"}));
   zone.dispatchEvent(new DragEvent("drop",{dataTransfer:dt,bubbles:true,cancelable:true}));
  });
+ await page.getByRole("button",{name:"Planos y hojas de datos de E-210 (1)",exact:true}).click();
  await expect(page.getByRole("button",{name:"GAD_E-210_revA.pdf",exact:true})).toBeVisible();
  await expect(page.getByLabel("Familia de GAD_E-210_revA")).toHaveValue("exchanger");
- await page.getByRole("button",{name:"elígelos en tu equipo"}).waitFor();
+ await page.getByRole("button",{name:"Cerrar planos"}).click();
  await page.getByLabel("Elegir documentos").setInputFiles({name:"DS_P-501_revA.pdf",mimeType:"application/pdf",buffer:Buffer.from("synthetic")});
+ await page.getByRole("button",{name:"Planos y hojas de datos de P-501 (1)",exact:true}).click();
  await expect(page.getByRole("button",{name:"DS_P-501_revA.pdf",exact:true})).toBeVisible();
+ await page.getByRole("button",{name:"Cerrar planos"}).click();
  await page.getByRole("radio",{name:"Proyectos",exact:true}).click();
  await expect(page).toHaveURL(/vista=proyectos/);
- await expect(page.getByText("Unidad de hidrotratamiento",{exact:true})).toBeVisible();
+ await expect(page.getByRole("button",{name:/Unidad de hidrotratamiento/})).toBeVisible();
  await page.getByRole("navigation",{name:"Familias de documentos"}).getByRole("button",{name:/Tanques/}).click();
- await expect(page.getByText("Terminal de GNL",{exact:true})).toBeVisible();
- await expect(page.getByText("Unidad de hidrotratamiento",{exact:true})).toHaveCount(0);
+ await expect(page.getByRole("button",{name:/Terminal de GNL/})).toBeVisible();
+ await expect(page.getByRole("button",{name:/Unidad de hidrotratamiento/})).toHaveCount(0);
  await page.goto("/familias");
  await expect(page).toHaveURL(/vista=familias/);
  await expect(page.getByRole("heading",{name:"Recipientes verticales",level:3})).toBeVisible();
@@ -331,30 +335,53 @@ test("la biblioteca de bocetos añade los PDF sin desplazar documentos ya guarda
     }));
   });
   await page.goto("/documentos?vista=documentos");
-  const links = page.getByRole("link", { name: /Abrir PDF de BC-/ });
-  await expect(links).toHaveCount(72);
+  const sketches = page.getByRole("button", { name: /Planos y hojas de datos de BC-/ });
+  await expect(sketches).toHaveCount(72);
   await expect(page.getByText("Mi diseño", { exact: true })).toBeVisible();
   await page.reload();
-  await expect(links).toHaveCount(72);
+  await expect(sketches).toHaveCount(72);
+  await page.getByRole("button", { name: "Planos y hojas de datos de Mi diseño (1)" }).click();
   await expect(page.getByLabel("Familia de Mi diseño")).toHaveValue("custom");
+  await page.getByRole("button", { name: "Cerrar planos" }).click();
 
   const classification = page.getByRole("banner").getByRole("radiogroup", { name: "Clasificación de documentos" });
   await classification.getByRole("radio", { name: "Proyectos", exact: true }).click();
   await expect(classification.getByRole("radio", { name: "Proyectos", exact: true })).toBeChecked();
   await page.getByRole("button", { name: /Biblioteca de bocetos/ }).click();
   await expect(classification.getByRole("radio", { name: "Equipos", exact: true })).toBeChecked();
-  await expect(links).toHaveCount(72);
+  await expect(sketches).toHaveCount(72);
   await expect(page.getByText("Mi diseño", { exact: true })).toHaveCount(0);
-  await page.getByRole("navigation", { name: "Familias de documentos" }).getByRole("button", { name: /Bombas/ }).click();
-  await expect(links).toHaveCount(4);
-  for (const link of await links.all()) {
-    const url = await link.getAttribute("href");
+  await page.getByLabel("Filtrar por familia").selectOption("pump");
+  await expect(sketches).toHaveCount(4);
+  for (const button of await sketches.all()) {
+    await button.click();
+    const url = await page.getByRole("link", { name: /Abrir PDF de BC-/ }).getAttribute("href");
     expect(url).toMatch(/^\/demo\/(?:bocetos\/BOC_BC-P10[12]_revA|industriales\/BC-P10[34]-A)\.pdf$/);
     const pdf = await page.request.get(url!);
     expect(pdf.ok()).toBe(true);
     expect(pdf.headers()["content-type"]).toContain("application/pdf");
     expect((await pdf.body()).subarray(0, 5).toString()).toBe("%PDF-");
+    await page.getByRole("button", { name: "Cerrar planos" }).click();
   }
+});
+
+test("el catálogo público muestra las tarjetas de GitLab y las revisiones del V-101", async ({ page }) => {
+  test.skip(Boolean(process.env.NEXT_PUBLIC_API_URL), "Comprueba el catálogo sin API.");
+  await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
+  await page.goto("/documentos");
+  await expect(page.getByText("Bandeja de documentos")).toHaveCount(0);
+  const vessels = page.getByRole("region", { name: "Recipientes a presión" });
+  const card = vessels.getByRole("listitem").filter({ has: page.getByRole("heading", { name: "V-101", exact: true }) });
+  await expect(card).toHaveCount(1);
+  await expect(card.getByRole("img", { name: "Vista 3D de V-101" })).toBeVisible({ timeout: 30_000 });
+  await card.getByRole("button", { name: "Planos y hojas de datos de V-101 (2)" }).click();
+  const dialog = page.getByRole("dialog", { name: "Planos y hojas de datos" });
+  await expect(dialog.getByRole("list", { name: "Versiones de V-101" })).toContainText("GAD_V-101_revB.pdf");
+  const revA = dialog.getByRole("list", { name: "Documentos de la Rev. A" });
+  await expect(revA.getByRole("link", { name: "Abrir PDF" })).toHaveAttribute("href", /GAD_V-101_revA\.pdf$/);
+  await dialog.getByRole("button", { name: "Cerrar planos" }).click();
+  await card.getByRole("button", { name: "Ver modelo 3D" }).click();
+  await expect(page).toHaveURL(/\/modelo\?vista=revision/);
 });
 
 test("las 18 fichas de familia muestran sus cuatro diseños sin cambiar de pestaña", async ({ page }) => {
@@ -417,7 +444,7 @@ test("/reiniciar vacía lo guardado en el navegador y vuelve a Documentos",async
  await page.getByRole("button",{name:"Nueva familia",exact:true}).click();
  await page.getByRole("form",{name:"Nueva familia"}).getByLabel("Nombre").fill("Familia para reiniciar");
  await page.getByRole("button",{name:"Guardar",exact:true}).click();
- await expect(page.getByText("Familia para reiniciar").first()).toBeVisible();
+ await expect(page.getByLabel("Filtrar por familia").locator("option:checked")).toHaveText("Familia para reiniciar");
  await page.goto("/reiniciar?destino=/documentos");
  await expect(page.getByRole("status")).toContainText("Demo reiniciada");
  await page.waitForURL("**/documentos");

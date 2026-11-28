@@ -1,15 +1,17 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Box } from "lucide-react";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/primitives";
+import { Badge, Button, Icon } from "@/components/ui/primitives";
 import { modelHref } from "@/features/workspace/model-links";
 import { useCanEdit } from "@/lib/accounts";
 import { DEMO } from "@/lib/mock/api";
 import { useUi } from "@/stores/ui";
 import { loadDocument, publishedFile, sketchAssets, type Design } from "./catalogue";
-import { ModelThumbnail } from "./model-thumbnail";
+import type { CatalogueModel } from "./dataset-documents";
 import { SketchModelDialog } from "./sketch-model-dialog";
 
 const action = "text-[12px] text-accent-text underline-offset-2 hover:underline";
@@ -29,13 +31,28 @@ async function download(id: string, filename: string) {
   }
 }
 
-export function DocumentActions({ design }: { design: Design }) {
+export function CatalogueModelButton({ model, tag, primary = false }: { model: CatalogueModel; tag: string; primary?: boolean }) {
+  const router = useRouter();
+  const canEdit = useCanEdit();
+  const setRevision = useUi((state) => state.setRevision);
+  if (model.demoRevision && canEdit) {
+    const revision = model.demoRevision;
+    return <Button variant={primary ? "primary" : "ghost"} size={primary ? undefined : "sm"}
+      onClick={() => { setRevision(revision); router.push(modelHref("revision")); }}>
+      <Icon icon={Box} size={primary ? 16 : 13} /> {primary ? "Ver modelo 3D" : "Ver 3D"}
+    </Button>;
+  }
+  return <SketchModelDialog tag={tag} name={model.name} ifc={model.ifc} documentId={model.documentId}
+    published={model.published} primary={primary} />;
+}
+
+export function DocumentActions({ design, showModel = true }: { design: Design; showModel?: boolean }) {
   const canEdit = useCanEdit();
   const setRevision = useUi(state => state.setRevision);
   const demoRevision = design.demo && (design.rev === "A" || design.rev === "B") ? design.rev : null;
   if (demoRevision) return <span className="flex flex-wrap gap-x-3">
     <a className={action} href={DEMO.revisions[demoRevision].pdf} target="_blank" rel="noreferrer">Abrir PDF</a>
-    {canEdit ? <Link className={action} href={modelHref("revision")} onClick={() => setRevision(demoRevision)}>Abrir en Modelo</Link> : null}
+    {showModel && canEdit ? <Link className={action} href={modelHref("revision")} onClick={() => setRevision(demoRevision)}>Abrir en Modelo</Link> : null}
   </span>;
 
   const assets = sketchAssets(design.id);
@@ -47,7 +64,7 @@ export function DocumentActions({ design }: { design: Design }) {
           aria-label={`Abrir PDF de ${tag} (pestaña nueva)`}>
           Abrir PDF
         </a>
-        {assets.ifc && <SketchModelDialog tag={tag} name={design.name} ifc={assets.ifc} />}
+        {showModel && assets.ifc ? <SketchModelDialog tag={tag} name={design.name} ifc={assets.ifc} /> : null}
         {canEdit && design.tag && <Link className={action} href={`/modelo?vista=disenos&diseno=${encodeURIComponent(design.tag)}`}
           aria-label={`Abrir ${tag} en Modelo › Diseños`}>
           Editar en Modelo
@@ -63,7 +80,7 @@ export function DocumentActions({ design }: { design: Design }) {
     const url = publishedFile(id);
     return <span className="flex flex-wrap items-center gap-x-3">
       <a href={url} download={filename} className={action}>{filename}</a>
-      {/\.ifc$/i.test(filename) ? <SketchModelDialog tag={design.tag ?? design.name} name={design.name} ifc={url} published /> : null}
+      {showModel && /\.ifc$/i.test(filename) ? <SketchModelDialog tag={design.tag ?? design.name} name={design.name} ifc={url} published /> : null}
     </span>;
   }
   return (
@@ -72,10 +89,4 @@ export function DocumentActions({ design }: { design: Design }) {
       {filename}
     </button>
   );
-}
-
-export function DocumentThumbnail({ design }: { design: Design }) {
-  const ifc = design.demo && (design.rev === "A" || design.rev === "B") ? DEMO.revisions[design.rev].ifc : sketchAssets(design.id)?.ifc;
-  if (!ifc) return /\.pdf$/i.test(design.filename ?? "") ? <ModelThumbnail /> : null;
-  return <SketchModelDialog tag={design.tag ?? design.name} name={design.filename ?? design.name} ifc={ifc} thumbnail />;
 }

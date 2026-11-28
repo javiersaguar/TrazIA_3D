@@ -3,10 +3,14 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { Box, ExternalLink, FileText, X } from "lucide-react";
 import Link from "next/link";
+import { toast } from "sonner";
 import { Badge, Button, Icon } from "@/components/ui/primitives";
 import { modelHref } from "@/features/workspace/model-links";
-import { apiURL } from "@/lib/api/config";
+import { useCanEdit } from "@/lib/accounts";
+import { accountsEnabled, apiURL } from "@/lib/api/config";
 import { DeleteRevisionButton } from "@/features/revisions/delete-revision-button";
+import { useCatalogue, type Design } from "./catalogue";
+import { CatalogueModelButton, DocumentActions } from "./document-actions";
 import type { GroupedRevision } from "./dataset-documents";
 import { IfcThumbnail } from "./ifc-thumbnail";
 
@@ -17,9 +21,9 @@ import { IfcThumbnail } from "./ifc-thumbnail";
 export function EquipmentDocumentsDialog({ tag, project, revisions }: {
   tag: string; project?: string; revisions: GroupedRevision[];
 }) {
-  const history = [...revisions].reverse().filter(revision => revision.documents.length || revision.model);
+  const history = [...revisions].reverse().filter(revision => revision.documents.length || revision.model || revision.localModel);
   const files = history.reduce((total, revision) => total + revision.documents.length, 0);
-  const newest = history.find(revision => revision.model)?.revision;
+  const newest = history.find(revision => revision.model || revision.localModel)?.revision;
   return (
     <Dialog.Root>
       <Dialog.Trigger asChild>
@@ -51,14 +55,19 @@ export function EquipmentDocumentsDialog({ tag, project, revisions }: {
             {history.map(revision => (
               <li key={revision.revision} className="rounded-xl border border-border">
                 <header className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
-                  {revision.model ? (
-                    <div aria-hidden><IfcThumbnail name={tag} url={apiURL(revision.model.ifc)} size="row" /></div>
+                  {revision.model || revision.localModel ? (
+                    <div aria-hidden><IfcThumbnail name={tag} size="row"
+                      url={revision.model ? apiURL(revision.model.ifc) : revision.localModel?.ifc}
+                      documentId={revision.localModel?.documentId} /></div>
                   ) : null}
-                  <span className="text-sm font-semibold text-strong">Rev. {revision.revision}</span>
+                  <span className="text-sm font-semibold text-strong">
+                    {revision.revision === "—" ? "Sin número de revisión" : `Rev. ${revision.revision}`}
+                  </span>
                   {revision.revision === newest ? <Badge tone="accent">Última</Badge> : null}
                   {revision.model ? (revision.approved ? <Badge tone="approved">Aprobada</Badge> : <Badge tone="warning">Borrador</Badge>)
-                    : <Badge>Sin modelo</Badge>}
+                    : revision.localModel ? null : <Badge>Sin modelo</Badge>}
                   <span className="ml-auto flex flex-wrap items-center gap-1">
+                    {revision.localModel ? <CatalogueModelButton model={revision.localModel} tag={tag} /> : null}
                     {revision.model ? (
                       <Dialog.Close asChild>
                         <Link href={modelHref("revision", revision.model.identity)} prefetch={false}
@@ -79,16 +88,20 @@ export function EquipmentDocumentsDialog({ tag, project, revisions }: {
                       ? apiURL(`/revisions/${encodeURIComponent(file.model.identity)}/documents/${encodeURIComponent(file.id)}`)
                       : undefined;
                     return (
-                      <li key={file.filename} className="flex min-w-0 items-center gap-2 py-1.5">
-                        <FileText aria-hidden size={15} className="shrink-0 text-muted" />
-                        <span className="min-w-0 flex-1 text-sm text-strong [overflow-wrap:anywhere]">{file.filename}</span>
-                        {original ? (
-                          <a href={original} target="_blank" rel="noreferrer" title="Abrir original en una pestaña nueva"
-                            aria-label={`Abrir original de ${file.filename} en una pestaña nueva`}
-                            className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-accent-text hover:bg-surface-raised">
-                            {file.filename.toLowerCase().endsWith(".pdf") ? "PDF" : "Abrir"} <ExternalLink aria-hidden size={13} />
-                          </a>
-                        ) : null}
+                      <li key={file.id ?? file.filename} className="space-y-1 py-1.5">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <FileText aria-hidden size={15} className="shrink-0 text-muted" />
+                          <span className="min-w-0 flex-1 text-sm text-strong [overflow-wrap:anywhere]">{file.filename}</span>
+                          {file.design ? <DocumentActions design={file.design} showModel={false} /> : null}
+                          {original ? (
+                            <a href={original} target="_blank" rel="noreferrer" title="Abrir original en una pestaña nueva"
+                              aria-label={`Abrir original de ${file.filename} en una pestaña nueva`}
+                              className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-accent-text hover:bg-surface-raised">
+                              {file.filename.toLowerCase().endsWith(".pdf") ? "PDF" : "Abrir"} <ExternalLink aria-hidden size={13} />
+                            </a>
+                          ) : null}
+                        </div>
+                        {file.design ? <DocumentClassification design={file.design} /> : null}
                       </li>
                     );
                   })}
@@ -99,5 +112,28 @@ export function EquipmentDocumentsDialog({ tag, project, revisions }: {
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+function DocumentClassification({ design }: { design: Design }) {
+  const catalogue = useCatalogue();
+  const canEdit = useCanEdit();
+  if (!canEdit || (accountsEnabled && !design.shared)) return null;
+
+  function assign(family: string, project: string) {
+    void catalogue.assign(design.id, family, project).catch((error) => toast.error(error.message));
+  }
+  const field = "h-8 max-w-full rounded-md border border-border bg-surface px-2 text-xs text-muted";
+  return (
+    <div className="flex flex-wrap gap-2 pl-5">
+      <select aria-label={`Familia de ${design.name}`} className={field} value={design.family}
+        onChange={(event) => assign(event.target.value, design.project)}>
+        {catalogue.families.map((family) => <option key={family.id} value={family.id}>{family.name}</option>)}
+      </select>
+      <select aria-label={`Proyecto de ${design.name}`} className={field} value={design.project}
+        onChange={(event) => assign(design.family, event.target.value)}>
+        {catalogue.projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+      </select>
+    </div>
   );
 }

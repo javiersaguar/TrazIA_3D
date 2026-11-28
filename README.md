@@ -36,7 +36,7 @@ corepack pnpm dev
 
 Abre [http://localhost:3000](http://localhost:3000). La portada ofrece el **V-101** para explorar la transición del boceto al IFC. En [Documentos → Proyectos](http://localhost:3000/documentos?vista=proyectos), abre la **Plataforma marina de producción** para ver el plano y el modelo en paralelo. Selecciona el aeroenfriador **E-140** para localizar sus datos en el plano. También se incluyen una planta de tratamiento de gas, un terminal costero de almacenamiento y una ampliación de refinería.
 
-La demo web usa los ejemplos sintéticos incluidos y arranca sin claves.
+La demo web usa los ejemplos sintéticos incluidos y arranca sin claves. En **Documentos → Equipos**, cada tarjeta reúne las versiones del equipo, sus planos y una miniatura cuando tiene IFC.
 
 ## API y procesamiento local
 

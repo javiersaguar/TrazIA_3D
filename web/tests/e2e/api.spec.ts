@@ -112,7 +112,7 @@ test("Documentos muestra los planos en un diálogo y conserva sus revisiones", a
   test.setTimeout(90_000);
   test.skip(base === "/api/trazia", "Usa la API local de pruebas sin cuentas");
   const rows = await (await request.get(`${base}/equipment`)).json() as {
-    tag: string; revisions: string[];
+    tag: string; project_id: string; revisions: string[];
     revision_meta: Record<string, { identity: string; documents?: { id: string; filename: string }[] }>;
   }[];
   const model = rows.find(row => row.tag === "80V01") ?? rows.find(row => row.tag === "V-101")!;
@@ -129,9 +129,11 @@ test("Documentos muestra los planos en un diálogo y conserva sus revisiones", a
   await expect(page).toHaveURL(/vista=familias/);
   await classification.getByRole("radio", { name: "Equipos", exact: true }).click();
 
-  const trigger = page.getByRole("button", { name: new RegExp(`Planos y hojas de datos de ${model.tag} `) });
+  const card = page.getByRole("listitem", { includeHidden: true }).filter({
+    has: page.getByRole("button", { name: `Borrar ${model.tag} de ${model.project_id}`, exact: true, includeHidden: true }),
+  });
+  const trigger = card.getByRole("button", { name: new RegExp(`Planos y hojas de datos de ${model.tag} `) });
   const dialog = page.getByRole("dialog", { name: "Planos y hojas de datos" });
-  const card = page.getByRole("heading", { name: model.tag, exact: true, includeHidden: true }).first().locator("xpath=ancestor::li[1]");
   await expect(trigger).toBeVisible();
   const before = await card.boundingBox();
   await trigger.click();
@@ -160,8 +162,9 @@ test("Documentos muestra los planos en un diálogo y conserva sus revisiones", a
   expect(bounds.x).toBeGreaterThan(0);
   expect(bounds.x + bounds.width).toBeLessThan(390);
   expect(Math.abs(bounds.y + bounds.height / 2 - 422)).toBeLessThan(4);
-  const thumb = await modelLink.getByTestId("ifc-thumbnail").boundingBox();
-  expect(thumb?.width).toBeCloseTo(44, 0);
+  const thumb = modelLink.locator("xpath=ancestor::li[1]").getByTestId("ifc-thumbnail");
+  await expect(thumb).toHaveCSS("width", "44px");
+  await expect(thumb).toHaveCSS("height", "44px");
   await modelLink.click();
   await expect(page).toHaveURL(new RegExp(encodeURIComponent(older!.identity)));
   await expect(page.getByRole("radio", { name: "Revisión", exact: true })).toBeChecked();

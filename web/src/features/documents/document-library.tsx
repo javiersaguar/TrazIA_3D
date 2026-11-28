@@ -29,10 +29,15 @@ export function DocumentLibrary({ compact = false }: { compact?: boolean } = {})
   const params = useSearchParams();
   const raw = params.get("vista");
   const view: LibraryView = raw === "proyectos" || raw === "familias" ? raw : "documentos";
-  const setView = (v: LibraryView) => window.history.replaceState(null, "", `/documentos?vista=${v}`);
+  const family = params.get("familia") ?? "all";
+  const project = params.get("proyecto") ?? "all";
+  function show(next: LibraryView, selectedFamily = family, selectedProject = project) {
+    const query = new URLSearchParams({ vista: next === "documentos" ? "equipos" : next });
+    if (selectedFamily !== "all") query.set("familia", selectedFamily);
+    if (selectedProject !== "all" && next === "documentos") query.set("proyecto", selectedProject);
+    window.history.replaceState(null, "", `/documentos?${query}`);
+  }
 
-  const [family, setFamily] = useState("all");
-  const [project, setProject] = useState("all");
   const [form, setForm] = useState<FormKind | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -47,12 +52,11 @@ export function DocumentLibrary({ compact = false }: { compact?: boolean } = {})
     setBusy(true);
     try {
       if (form === "family") {
-        setFamily(await catalogue.addFamily(name));
-        setProject("all");
+        show(view, await catalogue.addFamily(name), "all");
       }
       if (form === "project") {
         await catalogue.addProject(name);
-        setProject("all");
+        show(view, family, "all");
       }
       if (form === "design") {
         const file = data.get("file");
@@ -62,9 +66,7 @@ export function DocumentLibrary({ compact = false }: { compact?: boolean } = {})
           family: String(data.get("family")),
           project: String(data.get("project")),
         });
-        setFamily(String(data.get("family")));
-        setProject("all");
-        if (view !== "documentos") setView("documentos");
+        show("documentos", String(data.get("family")), "all");
       }
       setForm(null);
       toast.success(accountsEnabled ? "Guardado en el catálogo compartido" : "Guardado en este navegador");
@@ -78,9 +80,7 @@ export function DocumentLibrary({ compact = false }: { compact?: boolean } = {})
   if (!mounted) return <p role="status" className="p-6 text-sm text-muted">Cargando catálogo…</p>;
 
   const counts = (id: string) =>
-    view === "proyectos"
-      ? catalogue.projects.filter((p) => id === "all" || projectFamilies(p, catalogue.designs).includes(id)).length
-      : catalogue.designs.filter((d) => id === "all" || d.family === id).length;
+    catalogue.projects.filter((p) => id === "all" || projectFamilies(p, catalogue.designs).includes(id)).length;
 
   return (
     <div className={compact ? "space-y-3" : "space-y-6"}>
@@ -180,7 +180,7 @@ export function DocumentLibrary({ compact = false }: { compact?: boolean } = {})
       {!compact ? <Segmented<LibraryView>
         label="Clasificación de documentos"
         value={view}
-        onChange={setView}
+        onChange={(next) => show(next)}
         options={[
           { value: "documentos", label: "Equipos" },
           { value: "proyectos", label: "Proyectos" },
@@ -191,22 +191,18 @@ export function DocumentLibrary({ compact = false }: { compact?: boolean } = {})
       {view === "familias" ? (
         <FamiliesTab
           selected={family}
-          onOpen={(id, next) => {
-            setFamily(id);
-            setProject("all");
-            setView(next);
-          }}
+          onOpen={(id, next) => show(next, id, "all")}
         />
+      ) : view === "documentos" ? (
+        <DocumentsTab family={family} project={project}
+          onFamily={(id) => show(view, id)} onProject={(id) => show(view, family, id)} />
       ) : (
         <div className="grid gap-5 xl:grid-cols-[230px_minmax(0,1fr)]">
           <Panel className="h-fit p-3">
             <h2 className="px-2 py-2 text-sm font-semibold">Familias</h2>
             <nav aria-label="Familias de documentos" className="space-y-1">
               <button
-                onClick={() => {
-                  setFamily("all");
-                  setProject("all");
-                }}
+                onClick={() => show(view, "all", "all")}
                 aria-pressed={family === "all"}
                 className={cn(
                   "flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm",
@@ -223,10 +219,7 @@ export function DocumentLibrary({ compact = false }: { compact?: boolean } = {})
                   {section.items.map((f) => (
                     <button
                       key={f.id}
-                      onClick={() => {
-                        setFamily(f.id);
-                        setProject("all");
-                      }}
+                      onClick={() => show(view, f.id, "all")}
                       aria-pressed={family === f.id}
                       className={cn(
                         "flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm",
@@ -242,17 +235,7 @@ export function DocumentLibrary({ compact = false }: { compact?: boolean } = {})
             </nav>
           </Panel>
           <div className="min-w-0">
-            {view === "documentos" ? (
-              <DocumentsTab family={family} project={project} onProject={setProject} />
-            ) : (
-              <ProjectsTab
-                family={family}
-                onOpenProject={(id) => {
-                  setProject(id);
-                  setView("documentos");
-                }}
-              />
-            )}
+            <ProjectsTab family={family} onOpenProject={(id) => show("documentos", family, id)} />
           </div>
         </div>
       )}
