@@ -7,6 +7,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 import ifcopenshell
 import ifcopenshell.api.aggregate
+import ifcopenshell.api.classification
 import ifcopenshell.api.context
 import ifcopenshell.api.owner
 import ifcopenshell.api.pset
@@ -334,14 +335,14 @@ def build_ifc(
             "IfcPump": "IfcFlowMovingDevice",
             "IfcCompressor": "IfcFlowMovingDevice",
         }.get(main_class, main_class)
-    vessel = root(
-        main_class,
-        tag,
-        key,
-        predefined_type="PRESSUREVESSEL"
+    main_type = (
+        "PRESSUREVESSEL"
         if semantic_class == "IfcTank" and equipment.kind != "tank"
-        else "NOTDEFINED",
+        else "NOTDEFINED"
     )
+    if equipment.predefined_type and schema != "IFC2X3":
+        main_type = equipment.predefined_type
+    vessel = root(main_class, tag, key, predefined_type=main_type)
     vessel.Tag = tag
     pset(vessel, "TrazIA_ReferenceFrame", reference)
     if schema == "IFC2X3" and semantic_class != "IfcBuildingElementProxy":
@@ -390,16 +391,24 @@ def build_ifc(
     for index, part in enumerate(components):
         component_class = part.ifc_class
         if schema == "IFC2X3":
-            component_class = {
-                "IfcPipeSegment": "IfcFlowSegment",
-                "IfcPipeFitting": "IfcFlowFitting",
-            }.get(component_class, component_class)
+            component_class = IFC2X3_CLASSES.get(component_class, component_class)
+        extra = (
+            {"predefined_type": part.predefined_type}
+            if part.predefined_type and schema != "IFC2X3"
+            else {}
+        )
         product = (
             vessel
             if index == 0
-            else root(component_class, f"{tag}/{part.id}", f"{key}/{part.guid_key}")
+            else root(component_class, f"{tag}/{part.id}", f"{key}/{part.guid_key}", **extra)
         )
-        if index > 0 and schema == "IFC2X3" and component_class != part.ifc_class:
+        if part.description:
+            product.Description = part.description
+        if (
+            index > 0
+            and schema == "IFC2X3"
+            and part.ifc_class in ("IfcPipeSegment", "IfcPipeFitting")
+        ):
             component_type = root(
                 part.ifc_class + "Type",
                 f"{tag}/{part.id}/type",
@@ -440,13 +449,15 @@ def build_ifc(
                 styles=[assumed_style],
             )
         prefix = f"nozzles.{part.parent_id or part.id}."
+        # Cada pieza de un skid lleva solo sus campos: copiar los de todas multiplica el IFC.
+        propia = f"components.{part.parent_id or part.id}."
         local_fields = (
             traced
             if index == 0
             else {
                 k: v
                 for k, v in traced.items()
-                if k.startswith(prefix) or not k.startswith("nozzles.")
+                if k.startswith((prefix, propia)) or not k.startswith(("nozzles.", "components."))
             }
         )
         pset(
@@ -507,8 +518,67 @@ def build_ifc(
             "TrazIA_Technical",
             {k: f"{v.value} {v.unit}" for k, v in equipment.attributes.items()},
         )
+    _classify(model, equipment, components, products, base, key)
     enrich(model, revision, products, draft=draft, pset=pset, axis=axis, guid=stable_guid)
     return model
+
+
+# IFC2X3 no tiene las clases de equipo de IFC4: se usan sus supertipos de distribución.
+IFC2X3_CLASSES = {
+    "IfcPipeSegment": "IfcFlowSegment",
+    "IfcPipeFitting": "IfcFlowFitting",
+    "IfcPump": "IfcFlowMovingDevice",
+    "IfcCompressor": "IfcFlowMovingDevice",
+    "IfcElectricMotor": "IfcEnergyConversionDevice",
+    "IfcHeatExchanger": "IfcEnergyConversionDevice",
+    "IfcUnitaryEquipment": "IfcEnergyConversionDevice",
+    "IfcTank": "IfcFlowStorageDevice",
+    "IfcFilter": "IfcFlowTreatmentDevice",
+    "IfcElectricDistributionBoard": "IfcFlowController",
+    "IfcJunctionBox": "IfcFlowFitting",
+    "IfcValve": "IfcFlowController",
+    "IfcSensor": "IfcDistributionControlElement",
+}
+
+
+def _classify(model, equipment, components, products, base, key):
+    """Referencias de clasificación (ISO 14224, API, IFC…) del equipo y de sus piezas.
+
+    Un `IfcClassification` por sistema y un `IfcClassificationReference` por código, con GUID
+    estable: el mismo equipo da el mismo IFC.
+    """
+    pares = [(products[0], tuple(equipment.classification or ()))]
+    pares += [
+        (product, part.classification)
+        for part, product in zip(components[1:], products[1:], strict=True)
+        if part.classification
+    ]
+    sistemas, referencias = {}, {}
+    for product, refs in pares:
+        for ref in refs:
+            if ref.system not in sistemas:
+                sistemas[ref.system] = ifcopenshell.api.classification.add_classification(
+                    model, classification=ref.system
+                )
+            clave = (ref.system, ref.code)
+            if clave not in referencias:
+                referencias[clave] = ifcopenshell.api.classification.add_reference(
+                    model,
+                    products=[product],
+                    identification=ref.code,
+                    name=ref.name,
+                    classification=sistemas[ref.system],
+                )
+                rel = next(
+                    r
+                    for r in model.get_inverse(referencias[clave])
+                    if r.is_a("IfcRelAssociatesClassification")
+                )
+                rel.GlobalId = stable_guid(f"{base}/{key}/class/{ref.system}/{ref.code}")
+            else:
+                ifcopenshell.api.classification.add_reference(
+                    model, products=[product], reference=referencias[clave]
+                )
 
 
 # Nombre de pieza en `welds[].joins` → id de la pieza del IFC. Las virolas, tramos y anillos de

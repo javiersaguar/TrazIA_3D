@@ -66,6 +66,8 @@ def _ordered_bbox(value: tuple[float, float, float, float]) -> tuple[float, floa
 BBox = Annotated[
     tuple[float, float, float, float], Field(strict=False), AfterValidator(_ordered_bbox)
 ]
+# Punto de un perfil calcado del plano, en mm.
+ProfilePoint = Annotated[tuple[float, float], Field(strict=False)]
 
 
 class InferredRegion(Model):
@@ -214,12 +216,77 @@ class Envelope(Model):
         return self
 
 
+# Clases IFC4 admitidas para las piezas de un mecánico. Lo que no tiene clase propia en IFC4
+# (reductora, acoplamiento, bancada) sale como IfcBuildingElementProxy con su ObjectType.
+SkidIfcClass = Literal[
+    "IfcBuildingElementProxy",
+    "IfcPump",
+    "IfcCompressor",
+    "IfcElectricMotor",
+    "IfcHeatExchanger",
+    "IfcTank",
+    "IfcFilter",
+    "IfcUnitaryEquipment",
+    "IfcElectricDistributionBoard",
+    "IfcJunctionBox",
+    "IfcPlate",
+    "IfcMember",
+    "IfcFooting",
+    "IfcValve",
+    "IfcSensor",
+    "IfcPipeSegment",
+    "IfcPipeFitting",
+    "IfcMechanicalFastener",
+    "IfcDiscreteAccessory",
+    "IfcColumn",
+    "IfcBeam",
+    "IfcSlab",
+    "IfcRailing",
+]
+
+
+class ClassificationRef(Model):
+    """Referencia a una norma de clasificación: ISO 14224, API, IFC u otra taxonomía."""
+
+    system: str = Field(min_length=1, max_length=80)
+    code: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=200)
+
+
 class SkidPart(Model):
     """Volumen exterior de un mecánico: bancada, motor, reductora o máquina."""
 
     id: Identifier
     name: Attribute
     envelope: Envelope
+    # Ampliación aditiva: sin forma, la pieza es la caja de su envolvente, como antes.
+    # Un cilindro se inscribe en la envolvente con su eje en `axis`.
+    # `revolve` gira un perfil [(a, r)] alrededor de `axis`: `a` es la coordenada absoluta sobre
+    # el eje y `r` el radio, ambos en mm; el eje pasa por el centro de la envolvente.
+    # `extrude` estira un polígono de las otras dos coordenadas (en orden xyz) a lo largo de
+    # `axis`, entre las caras de la envolvente. Los perfiles se calcan del plano y comparten la
+    # fuente de la envolvente.
+    shape: Literal["box", "cylinder", "revolve", "extrude"] | None = optional()
+    axis: Literal["x", "y", "z"] | None = optional()
+    profile: list[ProfilePoint] | None = optional(min_length=2, max_length=400)
+    ifc_class: SkidIfcClass | None = optional()
+    predefined_type: str | None = optional(pattern=r"^[A-Z_]{2,40}$")
+    object_type: str | None = optional(max_length=80)
+    classification: list[ClassificationRef] | None = optional()
+
+    @model_validator(mode="after")
+    def check_shape(self):
+        con_eje = self.shape in ("cylinder", "revolve", "extrude")
+        if con_eje != (self.axis is not None):
+            raise ValueError("Cilindro, revolución y extrusión necesitan eje; caja no")
+        con_perfil = self.shape in ("revolve", "extrude")
+        if con_perfil != (self.profile is not None):
+            raise ValueError("Revolución y extrusión necesitan perfil; caja y cilindro no")
+        if self.shape == "extrude" and len(self.profile) < 3:
+            raise ValueError("Una extrusión necesita un polígono de al menos tres vértices")
+        if self.shape == "revolve" and any(r < 0 for _, r in self.profile):
+            raise ValueError("Un perfil de revolución no admite radios negativos")
+        return self
 
 
 class DirectionComponent(TracedField):
@@ -517,6 +584,9 @@ class Equipment(Model):
     envelope: Envelope | None = None
     # Vacío no se serializa: los recipientes y las huellas ya aprobadas no cambian.
     components: list[SkidPart] | None = optional()
+    # Clasificación normalizada del equipo (ISO 14224, API, IFC). Vacía no se serializa.
+    classification: list[ClassificationRef] | None = optional()
+    predefined_type: str | None = optional(pattern=r"^[A-Z_]{2,40}$")
     diameter: Dimension | None = None
     height: Dimension | None = None  # Longitud de virola entre tangentes, no altura total.
     head_depth: Dimension | None = None  # Profundidad común de los dos fondos semielipsoidales.

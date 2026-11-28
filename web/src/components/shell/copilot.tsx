@@ -24,6 +24,7 @@ const CONSEQUENCE: Record<ReviewField["group"], string> = {
   Envolvente: "La envolvente fija la posición de las boquillas, las plataformas y la carga sobre la cimentación.",
   Soporte: "El faldón define la cota de las boquillas inferiores y la interfaz con civil.",
   Boquillas: "Una boquilla mal situada se propaga a piping: la tubería llegaría a un punto que no existe.",
+  Componentes: "Una pieza mal situada en la bancada cambia accesos, mantenimiento y la interfaz con la cimentación.",
   "Datos de diseño": "Los datos de diseño viajan como propiedades del IFC y los consultan mecánica y civil.",
 };
 

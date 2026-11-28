@@ -1,7 +1,7 @@
 """Familias en mm; únicamente los sólidos de salida se expresan en metros."""
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from ..model import Equipment, Vector3
 from .geometry import head_mesh
@@ -33,10 +33,162 @@ class Part:
     object_type: str = "COMPONENT"
     parent_id: str | None = None
     properties: dict = field(default_factory=dict)
+    predefined_type: str | None = None
+    classification: tuple = ()
+    # Nombre legible de la pieza tal como se lee en el plano; va a IfcRoot.Description.
+    description: str | None = None
 
 
 def vector(value: Vector3):
     return tuple(getattr(value, axis).value / 1000 for axis in "xyz")
+
+
+AXES = {"x": (1.0, 0.0, 0.0), "y": (0.0, 1.0, 0.0), "z": (0.0, 0.0, 1.0)}
+
+
+# Ejes transversales de cada eje, en orden cíclico (eje, u, v) a derechas.
+CROSS = {"x": (1, 2), "y": (2, 0), "z": (0, 1)}
+
+
+def _place(k: int, a: float, cross: tuple[int, int], u: float, v: float) -> tuple:
+    p = [0.0, 0.0, 0.0]
+    p[k], p[cross[0]], p[cross[1]] = a, u, v
+    return tuple(p)
+
+
+def _outward(vertices: list, triangles: list) -> list:
+    """Da la vuelta a todas las caras si el volumen con signo sale negativo."""
+    volume = 0.0
+    for i, j, k in triangles:
+        (ax, ay, az), (bx, by, bz), (cx, cy, cz) = (vertices[n - 1] for n in (i, j, k))
+        volume += ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx)
+    return triangles if volume >= 0 else [(i, k, j) for i, j, k in triangles]
+
+
+def revolve_mesh(profile, axis: str, center: tuple[float, float], segments=48) -> Solid:
+    """Sólido de revolución de un perfil [(a, r)] en mm; sale en metros y cerrado."""
+    k, cross = "xyz".index(axis), CROSS[axis]
+    puntos = [(a / 1000, r / 1000) for a, r in profile]
+    vertices, anillos = [], []
+    for a, r in puntos:
+        if r <= 0:
+            vertices.append(_place(k, a, cross, *center))
+            anillos.append([len(vertices)] * segments)
+            continue
+        inicio = len(vertices)
+        for s in range(segments):
+            t = 2 * math.pi * s / segments
+            vertices.append(
+                _place(k, a, cross, center[0] + r * math.cos(t), center[1] + r * math.sin(t))
+            )
+        anillos.append(list(range(inicio + 1, inicio + segments + 1)))
+    triangles = []
+    for anillo, siguiente in zip(anillos, anillos[1:]):
+        for s in range(segments):
+            a, b = anillo[s], anillo[(s + 1) % segments]
+            c, d = siguiente[s], siguiente[(s + 1) % segments]
+            if a != b:
+                triangles.append((a, c, b))
+            if c != d:
+                triangles.append((b, c, d))
+    for (a, r), anillo, sentido in ((puntos[0], anillos[0], 1), (puntos[-1], anillos[-1], -1)):
+        if r > 0:
+            vertices.append(_place(k, a, cross, *center))
+            centro = len(vertices)
+            for s in range(segments):
+                b, c = anillo[s], anillo[(s + 1) % segments]
+                triangles.append((centro, b, c) if sentido > 0 else (centro, c, b))
+    return Solid("mesh", vertices=vertices, triangles=_outward(vertices, triangles))
+
+
+def _ears(poly: list) -> list:
+    """Triangula un polígono simple por recorte de orejas; índices desde 0."""
+    area = sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(poly, poly[1:] + poly[:1]))
+    idx = list(range(len(poly))) if area > 0 else list(range(len(poly)))[::-1]
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    def inside(p, a, b, c):
+        return cross(a, b, p) >= 0 and cross(b, c, p) >= 0 and cross(c, a, p) >= 0
+
+    out, guard = [], 0
+    while len(idx) > 3 and guard < 10000:
+        guard += 1
+        for n in range(len(idx)):
+            i, j, k = idx[n - 1], idx[n], idx[(n + 1) % len(idx)]
+            a, b, c = poly[i], poly[j], poly[k]
+            if cross(a, b, c) <= 1e-12:
+                continue
+            if any(inside(poly[m], a, b, c) for m in idx if m not in (i, j, k)):
+                continue
+            out.append((i, j, k))
+            idx.pop(n)
+            break
+        else:
+            raise ValueError("Polígono no simple: no se puede triangular")
+    out.append(tuple(idx))
+    return out
+
+
+def extrude_mesh(profile, axis: str, start: float, end: float) -> Solid:
+    """Prisma de un polígono [(u, v)] en mm (ejes transversales en orden xyz) entre start y end."""
+    k = "xyz".index(axis)
+    otros = [i for i in range(3) if i != k]
+    poly = []
+    for u, v in profile:
+        p = (u / 1000, v / 1000)
+        if not poly or p != poly[-1]:
+            poly.append(p)
+    if poly[0] == poly[-1]:
+        poly.pop()
+    # Las tapas salen en sentido antihorario: los laterales tienen que seguir el mismo sentido.
+    if sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(poly, poly[1:] + poly[:1])) < 0:
+        poly.reverse()
+    n = len(poly)
+
+    def punto(a, u, v):
+        p = [0.0, 0.0, 0.0]
+        p[k], p[otros[0]], p[otros[1]] = a, u, v
+        return tuple(p)
+
+    vertices = [punto(start / 1000, u, v) for u, v in poly] + [
+        punto(end / 1000, u, v) for u, v in poly
+    ]
+    triangles = []
+    for i, j, m in _ears(poly):
+        triangles.append((i + 1, m + 1, j + 1))
+        triangles.append((n + i + 1, n + j + 1, n + m + 1))
+    for i in range(n):
+        j = (i + 1) % n
+        triangles += [(i + 1, j + 1, n + j + 1), (i + 1, n + j + 1, n + i + 1)]
+    return Solid("mesh", vertices=vertices, triangles=_outward(vertices, triangles))
+
+
+def skid_solid(pieza) -> Solid:
+    """Sólido de una pieza de bancada: caja, cilindro, revolución o extrusión (mm → m)."""
+    origin, size = vector(pieza.envelope.origin), vector(pieza.envelope.size)
+    if pieza.shape in ("revolve", "extrude"):
+        k = "xyz".index(pieza.axis)
+        if pieza.shape == "revolve":
+            centro = tuple(origin[i] + size[i] / 2 for i in CROSS[pieza.axis])
+            return revolve_mesh(pieza.profile, pieza.axis, centro)
+        return extrude_mesh(
+            pieza.profile, pieza.axis, origin[k] * 1000, (origin[k] + size[k]) * 1000
+        )
+    if pieza.shape != "cylinder":
+        return Solid("box", origin=origin, size=size)
+    k = "xyz".index(pieza.axis)
+    across = [size[i] for i in range(3) if i != k]
+    base = [origin[i] + size[i] / 2 for i in range(3)]
+    base[k] = origin[k]
+    return Solid(
+        "cylinder",
+        origin=tuple(base),
+        direction=AXES[pieza.axis],
+        diameter=min(across) * 1000,
+        length=size[k] * 1000,
+    )
 
 
 def frustum(bottom: float, top: float, height: float, z: float, segments=64):
@@ -187,20 +339,27 @@ def parts(equipment: Equipment) -> list[Part]:
         caja = cuerpo.envelope if cuerpo is not None else equipment.envelope
         add(
             "shell",
-            Solid("box", origin=vector(caja.origin), size=vector(caja.size)),
+            skid_solid(cuerpo)
+            if cuerpo is not None
+            else Solid("box", origin=vector(caja.origin), size=vector(caja.size)),
         )
+        if cuerpo is not None:
+            result[-1] = replace(result[-1], description=cuerpo.name.value)
         for pieza in piezas:
             if pieza.id == "maquina":
                 continue
             add(
                 pieza.id,
-                Solid(
-                    "box",
-                    origin=vector(pieza.envelope.origin),
-                    size=vector(pieza.envelope.size),
-                ),
+                skid_solid(pieza),
                 key=f"component/{pieza.id}",
-                kind=pieza.id.upper(),
+                ifc_class=pieza.ifc_class or "IfcBuildingElementProxy",
+                kind=pieza.object_type or pieza.id.upper(),
+            )
+            result[-1] = replace(
+                result[-1],
+                predefined_type=pieza.predefined_type,
+                classification=tuple(pieza.classification or ()),
+                description=pieza.name.value,
             )
     elif equipment.kind == "vertical_vessel":
         add(

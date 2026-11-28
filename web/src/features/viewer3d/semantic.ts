@@ -77,6 +77,10 @@ export function hasAssumption(id: string, psets: PropertySets): boolean {
 
 export function elementForField(path: string): string {
   if (path.startsWith("nozzles.")) return `nozzle:${path.split(".")[1]}`;
+  if (path.startsWith("components.")) {
+    const id = path.split(".")[1] ?? "";
+    return id === "maquina" ? "shell" : `element:${id}`;
+  }
   if (path.startsWith("welds.")) return `weld:${path.split(".")[1]}`;
   if (path.startsWith("skirt")) return "skirt";
   if (path.startsWith("fasteners.")) return `fastener:${path.split(".")[1]}`;
@@ -148,7 +152,8 @@ export function shortLabel(source: LabelSource): string {
     if (name?.includes("·")) return name.split("·").slice(1).join("·").trim();
     return processTag(source) ?? source.name;
   }
-  return elementLabel(source.semanticId);
+  // Las piezas de un mecánico llevan en Description su nombre leído del plano.
+  return text(source.description) ?? elementLabel(source.semanticId);
 }
 
 /**
@@ -157,7 +162,7 @@ export function shortLabel(source: LabelSource): string {
  */
 export function productLabel(source: LabelSource): string {
   const trace = source.psets.TrazIA_Traceability;
-  if (!trace?.ProcessProject) return elementLabel(source.semanticId);
+  if (!trace?.ProcessProject) return text(source.description) ?? elementLabel(source.semanticId);
   const name = text(source.name);
   const parent = text(trace.ParentComponent);
   if (parent) {

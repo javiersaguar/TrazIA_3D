@@ -14,7 +14,7 @@ import type { NozzleEvidence } from "./nozzle-summary";
 pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 type EvidenceField = Pick<ReviewField, "path" | "label" | "status"> & {
   elementId: string;
-  source: Pick<ReviewField["source"], "page" | "bbox">;
+  source: Pick<ReviewField["source"], "page" | "bbox"> & { locator?: string };
 };
 
 type Props<T extends EvidenceField> = {
@@ -67,9 +67,21 @@ export function PdfPanel<T extends EvidenceField>({
         : (focusedRow?.page ?? focusedMark?.page ?? selected?.source.page ?? 1),
     ),
   );
+  // Varios campos de una pieza comparten recuadro (nombre, origen y tamaño en una vista): uno solo.
+  const groups = useMemo(() => {
+    const byBox = new Map<string, T[]>();
+    for (const f of fields) {
+      if (!f.source.bbox || f.source.page !== page) continue;
+      const key = `${f.elementId}|${f.source.bbox.join(",")}`;
+      byBox.set(key, [...(byBox.get(key) ?? []), f]);
+    }
+    return [...byBox.values()];
+  }, [fields, page]);
+  // Un skid trae decenas de piezas: sin selección, solo el contorno para no tapar el plano.
+  const dense = groups.length > 30;
   const boxes = useMemo(
-    () => fields.filter((f) => f.source.bbox && f.source.page === page),
-    [fields, page],
+    () => groups.map((g) => g.find((f) => f.path === selectedPath) ?? g[0]!),
+    [groups, selectedPath],
   );
   const rowBox = focusedRow?.page === page ? focusedRow.bbox : undefined;
   const fileName = url.split("/").at(-1)?.split("?")[0];
@@ -238,6 +250,7 @@ export function PdfPanel<T extends EvidenceField>({
                       type="button"
                       data-path={f.path}
                       aria-label={`Evidencia de ${f.label}`}
+                      title={f.source.locator ? `${f.label}\n${f.source.locator}` : f.label}
                       onClick={() => onSelect(f)}
                       onMouseEnter={() => onHover(f)}
                       onMouseLeave={() => onHover(null)}
@@ -256,7 +269,9 @@ export function PdfPanel<T extends EvidenceField>({
                             ? "border-accent-strong bg-accent/20 shadow-[0_0_0_3px_var(--accent-soft)]"
                             : related
                               ? "border-accent bg-accent/10"
-                              : f.status === "candidate"
+                              : dense
+                                ? "border-approved/25 group-hover:border-accent group-hover:bg-accent/10"
+                                : f.status === "candidate"
                                 ? "border-accent/40 bg-accent/5 group-hover:border-accent"
                                 : "border-approved/50 bg-approved/10",
                         )}

@@ -37,7 +37,7 @@ import { OcclusionIndex } from "./occlusion";
 import { ProductMesh, type ElementState } from "./product-mesh";
 import { IfcInspector } from "./inspector";
 import { ProcessEnvironment } from "./process-environment";
-import { elementLabel, hasAssumption, parentElementId, productLabel } from "./semantic";
+import { hasAssumption, parentElementId, productLabel } from "./semantic";
 import { AnimatedSection } from "./section";
 import { isWeld, weldInfo, weldSummary } from "./welds";
 import {
@@ -490,7 +490,7 @@ export function IfcViewer({
   const treeRow = (id: string, depth: number): ReactNode => {
     const node = hierarchy.nodes.get(id);
     if (!node) return null;
-    const label = process ? labelOf(node) : elementLabel(node.semanticId);
+    const label = labelOf(node);
     const ids = node.productIds.length ? node.productIds : [node.semanticId];
     const isHidden = ids.every((productId) => hidden.has(productId));
     return (

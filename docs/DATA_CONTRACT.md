@@ -351,3 +351,30 @@ estrategia ni confianza estimada: confianza 1 y sin bruta. `Revision.derived_fro
 revisión DRAFT nueva con su base, su huella y la propuesta. Un valor de diseño nunca cita el
 plano original y nunca entra en el aprendizaje de extracción.
 [Matriz, API y límites](EDICION_ASISTIDA.md).
+
+## Piezas de mecánicos con forma, clase IFC y clasificación (28/11)
+
+Ampliación aditiva de 0.3, sin cambiar `schema_version`. Los campos nuevos son opcionales y no
+se serializan cuando faltan, así que los JSON y las huellas existentes no cambian.
+
+- `SkidPart.shape`: `box` (por defecto), `cylinder`, `revolve` o `extrude`. Cilindro,
+  revolución y extrusión llevan `axis`. `revolve` gira un perfil `[(a, r)]` (coordenada absoluta
+  sobre el eje y radio, en mm) alrededor de un eje que pasa por el centro de la envolvente.
+  `extrude` estira un polígono de las otras dos coordenadas (en orden xyz) entre las caras de la
+  envolvente. El perfil comparte la fuente de la envolvente.
+- `SkidPart.ifc_class`: una de las clases IFC4 admitidas (`IfcPump`, `IfcCompressor`,
+  `IfcElectricMotor`, `IfcHeatExchanger`, `IfcTank`, `IfcFilter`, `IfcUnitaryEquipment`,
+  `IfcElectricDistributionBoard`, `IfcJunctionBox`, `IfcPlate`, `IfcMember`, `IfcFooting`,
+  `IfcValve`, `IfcSensor`, `IfcPipeSegment`, `IfcPipeFitting`, `IfcMechanicalFastener`,
+  `IfcDiscreteAccessory`, `IfcColumn`, `IfcBeam`, `IfcSlab`, `IfcRailing`). Lo que no tiene clase
+  propia en IFC4 (multiplicador, acoplamiento, bancada) sale como `IfcBuildingElementProxy` con su
+  `object_type`. `predefined_type` sigue el enumerado IFC4 de la clase (`USERDEFINED` si no hay).
+- `SkidPart.classification` y `Equipment.classification`: lista de `{system, code, name}` para
+  ISO 14224 (clase, tipo y subunidad), la norma API que aplique y la clase IFC4.
+- Pieza que el plano no dibuja (rotor, rodetes, cojinetes, recorridos de tubería no acotados):
+  su envolvente lleva `state: assumed`, una regla `asumido.*` y una explicación de cómo se ha
+  dimensionado.
+- `Source.bbox` de cada campo apunta a la vista del plano de la que se ha leído. Cuando el GA tiene
+  vistas en láminas distintas, `Source.page` es la lámina de ese recuadro.
+- Boquilla con tamaño `HOLD` en la tabla de puntos de conexión: `size_nps = "HOLD"`, diámetro
+  provisional con regla `asumido.od_tamano_hold` y sin `flange_standard`.

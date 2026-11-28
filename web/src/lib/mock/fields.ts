@@ -4,7 +4,7 @@ import { fieldLabel } from "@/lib/field-labels";
 /** Estado de revisión humana de un campo en la UI. */
 export type FieldStatus = "candidate" | "accepted" | "corrected" | "assumed";
 
-export type FieldGroup = "Identificación" | "Envolvente" | "Soporte" | "Boquillas" | "Datos de diseño";
+export type FieldGroup = "Identificación" | "Envolvente" | "Soporte" | "Boquillas" | "Componentes" | "Datos de diseño";
 
 /**
  * Ids semánticos compartidos entre plano, 3D y lista de campos.
@@ -14,8 +14,9 @@ export type FieldGroup = "Identificación" | "Envolvente" | "Soporte" | "Boquill
  *   "head-bottom" ↔ "V-101/bottom_head"
  *   "skirt"       ↔ "V-101/skirt"
  *   "nozzle:N1"   ↔ IfcPipeSegment "V-101/N1"
+ *   "element:X"   ↔ pieza X de un skid (components.X); el cuerpo "maquina" es "shell"
  */
-export type ElementId = "shell" | "head-top" | "head-bottom" | "skirt" | `nozzle:${string}`;
+export type ElementId = "shell" | "head-top" | "head-bottom" | "skirt" | `nozzle:${string}` | `element:${string}`;
 
 export type ReviewField = {
   /** Auditoría de la última escritura confirmada, utilizada para deshacer en la API. */
@@ -167,7 +168,9 @@ export function flattenRevision(revision: Revision): ReviewField[] {
     if ("value" in record && "source" in record) {
       if (!known.has(path) && (typeof record.value === "string" || typeof record.value === "number")) {
         const data = record as unknown as Parameters<typeof field>[5];
-        out.push(field(path, fieldLabel(path), "Envolvente", elementForPath(path), 0.8, data));
+        const pieza = componentLabel(path, (eq as SkidEquipment).components);
+        if (pieza) out.push(field(path, pieza, "Componentes", elementForPath(path), 0.6, data));
+        else out.push(field(path, fieldLabel(path), "Envolvente", elementForPath(path), 0.8, data));
       }
       return;
     }
@@ -200,7 +203,29 @@ export function riskLevel(f: Pick<ReviewField, "impact">): "alto" | "medio" | "b
 /** Elemento 3D afectado por una ruta del contrato (también para los cambios). */
 export function elementForPath(path: string): ElementId {
   if (path.startsWith("nozzles.")) return `nozzle:${path.split(".")[1] ?? ""}`;
+  if (path.startsWith("components.")) return componentElement(path.split(".")[1] ?? "");
   if (path.startsWith("skirt")) return "skirt";
   if (path === "head_depth" || path === "horizontal.head_depth") return "head-top";
   return "shell";
+}
+
+/** Pieza de un skid: el cuerpo de la máquina es el producto principal del IFC ("shell"). */
+export function componentElement(id: string): ElementId {
+  return id === "maquina" ? "shell" : `element:${id}`;
+}
+
+const COMPONENT_PART: Record<string, string> = {
+  name: "Nombre", "envelope.origin.x": "Origen X", "envelope.origin.y": "Origen Y", "envelope.origin.z": "Origen Z",
+  "envelope.size.x": "Dimensión X", "envelope.size.y": "Dimensión Y", "envelope.size.z": "Dimensión Z",
+};
+
+/** Etiqueta «pieza · magnitud» de un campo de components.<id>, con el nombre leído del plano. */
+type SkidEquipment = { components?: { id: string; name?: { value?: unknown } }[] | null };
+
+function componentLabel(path: string, components: SkidEquipment["components"]): string | null {
+  const match = /^components\.([^.]+)\.(.+)$/.exec(path);
+  if (!match) return null;
+  const [, id = "", rest = ""] = match;
+  const name = components?.find(c => c.id === id)?.name?.value;
+  return `${typeof name === "string" ? name : id} · ${COMPONENT_PART[rest] ?? rest}`;
 }
